@@ -1,0 +1,41 @@
+{
+  "model_family": "sentence_transformer_knn",
+  "dataset_name": "PolyAI/banking77",
+  "train_split": "train",
+  "test_split": "test",
+  "artifacts_dir": "../artifacts/sentence_transformer_knn",
+  "reports_dir": "../reports/sentence_transformer_knn",
+  "text_column": "text",
+  "label_column": "label",
+  "random_seed": 42,
+  "tfidf": {
+    "lowercase": true,
+    "strip_accents": "unicode",
+    "normalization": "none",
+    "ngram_range": [1, 2],
+    "min_df": 2,
+    "max_df": 0.98,
+    "sublinear_tf": true,
+    "max_features": 50000
+  },
+  "encoder": {
+    "model_name": "all-MiniLM-L6-v2",
+    "batch_size": 32,
+    "normalize_embeddings": true,
+    "device": null
+  },
+  "classifier": {
+    "c": 1.0,
+    "class_weight": "balanced",
+    "max_iter": 5000,
+    "dual": true,
+    "random_state": 42,
+    "knn_neighbors": 5,
+    "knn_weights": "distance",
+    "knn_metric": "cosine"
+  },
+  "analysis": {
+    "top_k_confusions": 25,
+    "top_k_features_per_class": 20
+  }
+}

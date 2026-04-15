@@ -1,0 +1,202 @@
+# Banking77 Intent Classifier
+
+Production-ready intent classification experiments for the [Banking77](https://huggingface.co/datasets/PolyAI/banking77) dataset, from TF-IDF baselines through sentence-transformer models.
+
+This repository is designed to be a clean public GitHub repo rather than a notebook experiment. It focuses on:
+
+- reusable package structure
+- deterministic training configuration
+- artifact persistence for production usage
+- confusion-matrix analysis to inspect failure modes
+- reusable loading and inference helpers
+
+## Current Best
+
+The frozen champion model is:
+
+- model family: `sentence_transformer_linear`
+- encoder: `BAAI/bge-small-en-v1.5`
+- classifier: `LinearSVC`
+- accuracy: `0.9308`
+- macro F1: `0.9307`
+- top-5 accuracy: `0.9893`
+
+This is the selected production model for the repository.
+
+Run it with:
+
+```powershell
+banking77-train --config configs/champion.json
+```
+
+It writes to:
+
+- `artifacts/champion/`
+- `reports/champion/`
+
+## Model Families
+
+The repository includes:
+
+- `TfidfVectorizer`
+- `LinearSVC`
+- sentence-transformer encoders
+- KNN over dense embeddings
+
+`LinearSVC` is intentionally used instead of a kernel SVM so the model remains fast, scalable, and interpretable. Sentence-transformer variants trade some interpretability for much stronger semantic understanding.
+
+## Quick Start
+
+### 1. Create a virtual environment
+
+```powershell
+py -3.11 -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install -e ".[dev]"
+```
+
+### 2. Train the frozen champion
+
+```powershell
+banking77-train --config configs/champion.json
+```
+
+You can also run the script directly:
+
+```powershell
+python scripts/train_phase1.py --config configs/champion.json
+```
+
+### 3. Train the frozen TF-IDF baseline
+
+```powershell
+banking77-train --config configs/tfidf_svc.json
+```
+
+### 4. Run the strongest TF-IDF variant
+
+```powershell
+banking77-train --config configs/tfidf_svc_lemmatized.json
+```
+
+### 5. Run randomized TF-IDF hyperparameter search
+
+```powershell
+banking77-tune --config configs/tfidf_svc_lemmatized_random_search.json
+```
+
+This runs `RandomizedSearchCV` on the training split only, samples a moderate number of parameter combinations, selects the best configuration by macro F1, then evaluates the best estimator on the untouched test split. It saves:
+
+- `best_params.json`
+- `search_settings.json`
+- `cv_results.csv`
+- the usual model artifacts and evaluation reports for the best estimator
+
+### 6. Run the first sentence-transformer linear baseline
+
+```powershell
+banking77-train --config configs/sentence_transformer_linear.json
+```
+
+This uses a pretrained sentence-transformer encoder (`all-MiniLM-L6-v2`) to embed each utterance, then trains a `LinearSVC` classifier on top of those dense embeddings.
+
+### 7. Run the sentence-transformer KNN comparison
+
+```powershell
+banking77-train --config configs/sentence_transformer_knn.json
+```
+
+### 8. Run the winning encoder comparison directly
+
+```powershell
+banking77-train --config configs/sentence_transformer_linear_bge_small.json
+```
+
+This keeps the linear SVM head the same, but swaps the encoder to `BAAI/bge-small-en-v1.5` for a final apples-to-apples embedding comparison.
+
+### 9. Run the reranked champion experiment
+
+```powershell
+banking77-train --config configs/sentence_transformer_linear_reranked.json
+```
+
+This keeps the champion candidate generator (`BAAI/bge-small-en-v1.5 + LinearSVC`), takes its Top-5 candidate labels, and reranks them with `cross-encoder/ms-marco-MiniLM-L-6-v2` using readable label text.
+
+This experiment is kept for reference only. It significantly underperformed the frozen champion and is not recommended for production use.
+
+## Outputs
+
+Each run writes production-friendly artifacts to the configured `artifacts/` and `reports/` directories. For the frozen champion alias, that means `artifacts/champion/` and `reports/champion/`.
+
+Champion outputs include:
+
+- serialized model pipeline via `joblib`
+- model metadata JSON
+- label map JSON
+- feature mapping JSON
+- embedding-space or linear weights when available
+- classification report JSON
+- confusion matrix CSV
+- normalized confusion matrix CSV
+- top confusion pairs CSV
+- top features by class CSV
+- confusion matrix PNG
+
+## Inference Example
+
+```python
+from banking77_intent_classifier.inference import load_predictor
+
+predictor = load_predictor("artifacts/champion/model.joblib", "artifacts/champion/label_mapping.json")
+prediction = predictor.predict_one("My card still has not arrived")
+print(prediction.label, prediction.label_id)
+```
+
+## Example Files
+
+After training the champion config, expect output similar to:
+
+```text
+artifacts/champion/
+|-- feature_mapping.json
+|-- label_mapping.json
+|-- model.joblib
+|-- model_metadata.json
+`-- weights.npz
+
+reports/champion/
+|-- classification_report.json
+|-- confusion_matrix.csv
+|-- confusion_matrix.png
+|-- confusion_matrix_normalized.csv
+|-- metrics_summary.json
+|-- top_confusions.csv
+`-- top_features_by_class.csv
+```
+
+## Production Notes
+
+- Training is deterministic via an explicit random seed.
+- All important outputs are persisted for reproducibility and deployment.
+- The code is packaged for reuse instead of being tied to a single notebook.
+- Model diagnostics are written to disk so the same training job can support CI, batch training, or future orchestration.
+- The recommended production config is `configs/champion.json`.
+
+## Tests
+
+```powershell
+pytest
+```
+
+## Experiment History
+
+- `tfidf_svc`: frozen sparse baseline
+- `tfidf_svc_trigrams`: trigram experiment
+- `tfidf_svc_lemmatized`: strongest TF-IDF family variant
+- `tfidf_svc_lemmatized_c*`: `C` sweep around the lemmatized TF-IDF model
+- `tfidf_svc_lemmatized_random_search`: final randomized TF-IDF search
+- `sentence_transformer_linear`: first embedding-based linear model with `all-MiniLM-L6-v2`
+- `sentence_transformer_knn`: embedding-based KNN comparison
+- `sentence_transformer_linear_bge_small`: best model found
+- `sentence_transformer_linear_reranked`: cross-encoder reranking experiment, rejected after a large regression
+- `champion`: frozen alias for the preferred production candidate

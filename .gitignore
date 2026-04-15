@@ -1,0 +1,10 @@
+.pytest_cache/
+.ruff_cache/
+.venv/
+*.egg-info/
+__pycache__/
+artifacts/*
+!artifacts/.gitkeep
+reports/*
+!reports/.gitkeep
+

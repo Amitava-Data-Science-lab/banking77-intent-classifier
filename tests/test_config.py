@@ -1,0 +1,90 @@
+from pathlib import Path
+
+from banking77_intent_classifier.config import load_config, load_tuning_config
+
+
+def test_load_config_reads_tfidf_svc_file() -> None:
+    config = load_config(Path("configs/tfidf_svc.json"))
+
+    assert config.dataset_name == "PolyAI/banking77"
+    assert config.tfidf.ngram_range == (1, 2)
+    assert config.classifier.max_iter == 5000
+
+
+def test_load_config_reads_tfidf_svc_trigrams_file() -> None:
+    config = load_config(Path("configs/tfidf_svc_trigrams.json"))
+
+    assert config.dataset_name == "PolyAI/banking77"
+    assert config.tfidf.ngram_range == (1, 3)
+    assert config.classifier.max_iter == 5000
+
+
+def test_load_config_reads_tfidf_svc_lemmatized_file() -> None:
+    config = load_config(Path("configs/tfidf_svc_lemmatized.json"))
+
+    assert config.dataset_name == "PolyAI/banking77"
+    assert config.tfidf.normalization == "lemma"
+    assert config.tfidf.ngram_range == (1, 2)
+
+
+def test_load_config_reads_c_sweep_files() -> None:
+    low_c_config = load_config(Path("configs/tfidf_svc_lemmatized_c001.json"))
+    high_c_config = load_config(Path("configs/tfidf_svc_lemmatized_c100.json"))
+
+    assert low_c_config.classifier.c == 0.01
+    assert high_c_config.classifier.c == 100.0
+    assert low_c_config.tfidf.normalization == "lemma"
+    assert high_c_config.tfidf.normalization == "lemma"
+
+
+def test_load_tuning_config_normalizes_search_space() -> None:
+    config = load_tuning_config(Path("configs/tfidf_svc_lemmatized_random_search.json"))
+
+    assert config.experiment.tfidf.normalization == "lemma"
+    assert config.search.search_type == "randomized"
+    assert config.search.cv == 5
+    assert config.search.param_distributions["vectorizer__ngram_range"] == [(1, 2), (1, 3)]
+    assert config.search.param_distributions["classifier__C"] == [0.1, 1.0, 10.0]
+    assert config.search.n_iter == 20
+
+
+def test_load_config_reads_sentence_transformer_file() -> None:
+    config = load_config(Path("configs/sentence_transformer_linear.json"))
+
+    assert config.model_family == "sentence_transformer_linear"
+    assert config.encoder.model_name == "all-MiniLM-L6-v2"
+    assert config.classifier.c == 1.0
+
+
+def test_load_config_reads_sentence_transformer_knn_file() -> None:
+    config = load_config(Path("configs/sentence_transformer_knn.json"))
+
+    assert config.model_family == "sentence_transformer_knn"
+    assert config.encoder.model_name == "all-MiniLM-L6-v2"
+    assert config.classifier.knn_neighbors == 5
+    assert config.classifier.knn_metric == "cosine"
+
+
+def test_load_config_reads_sentence_transformer_bge_small_file() -> None:
+    config = load_config(Path("configs/sentence_transformer_linear_bge_small.json"))
+
+    assert config.model_family == "sentence_transformer_linear"
+    assert config.encoder.model_name == "BAAI/bge-small-en-v1.5"
+    assert config.classifier.c == 1.0
+
+
+def test_load_config_reads_champion_file() -> None:
+    config = load_config(Path("configs/champion.json"))
+
+    assert config.model_family == "sentence_transformer_linear"
+    assert config.encoder.model_name == "BAAI/bge-small-en-v1.5"
+    assert config.artifacts_dir.name == "champion"
+
+
+def test_load_config_reads_reranked_file() -> None:
+    config = load_config(Path("configs/sentence_transformer_linear_reranked.json"))
+
+    assert config.model_family == "sentence_transformer_linear_reranked"
+    assert config.encoder.model_name == "BAAI/bge-small-en-v1.5"
+    assert config.reranker.enabled is True
+    assert config.reranker.top_k == 5

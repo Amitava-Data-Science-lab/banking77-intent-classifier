@@ -1,0 +1,30 @@
+{
+  "dataset_name": "PolyAI/banking77",
+  "train_split": "train",
+  "test_split": "test",
+  "artifacts_dir": "../artifacts/phase1",
+  "reports_dir": "../reports/phase1",
+  "text_column": "text",
+  "label_column": "label",
+  "random_seed": 42,
+  "tfidf": {
+    "lowercase": true,
+    "strip_accents": "unicode",
+    "ngram_range": [1, 2],
+    "min_df": 2,
+    "max_df": 0.98,
+    "sublinear_tf": true,
+    "max_features": 50000
+  },
+  "classifier": {
+    "c": 1.0,
+    "class_weight": "balanced",
+    "max_iter": 5000,
+    "dual": true,
+    "random_state": 42
+  },
+  "analysis": {
+    "top_k_confusions": 25,
+    "top_k_features_per_class": 20
+  }
+}
