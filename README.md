@@ -182,6 +182,16 @@ reports/champion/
 - Model diagnostics are written to disk so the same training job can support CI, batch training, or future orchestration.
 - The recommended production config is `configs/champion.json`.
 
+## Publishing
+
+To publish the champion model:
+
+- Hugging Face model card template: `hub/README.md`
+- W&B artifact upload script: `scripts/upload_champion_to_wandb.py`
+- Hugging Face upload script: `scripts/upload_champion_to_hf.py`
+
+If you have not run `configs/champion.json` yet, either run it first or point the upload scripts at the existing `sentence_transformer_linear_bge_small` artifact/report directories.
+
 ## Tests
 
 ```powershell
