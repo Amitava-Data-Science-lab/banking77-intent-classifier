@@ -101,6 +101,7 @@ class ExperimentConfig:
     model_family: str
     dataset_type: str
     dataset_name: str
+    dataset_task: str
     dataset_source: Path | None
     train_split: str
     validation_split: str | None
@@ -187,6 +188,7 @@ def _parse_experiment_config(raw: dict, base_dir: Path) -> ExperimentConfig:
         model_family=raw.get("model_family", "tfidf_svc"),
         dataset_type=raw.get("dataset_type", "banking77"),
         dataset_name=raw["dataset_name"],
+        dataset_task=raw.get("dataset_task", "full_intent"),
         dataset_source=((base_dir / raw["dataset_source"]).resolve() if raw.get("dataset_source") else None),
         train_split=raw.get("train_split", "train"),
         validation_split=raw.get("validation_split"),

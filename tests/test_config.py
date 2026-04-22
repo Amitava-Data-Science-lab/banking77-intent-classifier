@@ -96,6 +96,7 @@ def test_load_config_reads_clinc150_file() -> None:
 
     assert config.dataset_type == "clinc150"
     assert config.dataset_name == "clinc150"
+    assert config.dataset_task == "full_intent"
     assert config.dataset_source.name == "data_full.json"
     assert config.validation_split == "val"
     assert config.include_oos is True
@@ -146,6 +147,24 @@ def test_load_config_reads_clinc150_transformer_mpnet_file() -> None:
     assert config.transformer.threshold_max_in_scope_false_oos_rate == 0.03
     assert config.transformer.threshold_macro_f1_tolerance_ladder == [0.01, 0.02, 0.03, 0.04, 0.05]
     assert config.transformer.threshold_fallback_strategy == "best_macro_f1"
+
+
+def test_load_config_reads_clinc150_binary_oos_tfidf_file() -> None:
+    config = load_config(Path("configs/clinc150_binary_oos_tfidf_svc_lemmatized.json"))
+
+    assert config.dataset_type == "clinc150"
+    assert config.dataset_task == "binary_oos"
+    assert config.tfidf.normalization == "lemma"
+    assert config.artifacts_dir.name == "binary_oos_tfidf_svc_lemmatized"
+
+
+def test_load_config_reads_clinc150_binary_oos_bge_file() -> None:
+    config = load_config(Path("configs/clinc150_binary_oos_sentence_transformer_linear_bge_small.json"))
+
+    assert config.model_family == "sentence_transformer_linear"
+    assert config.dataset_task == "binary_oos"
+    assert config.encoder.model_name == "BAAI/bge-small-en-v1.5"
+    assert config.reports_dir.name == "binary_oos_sentence_transformer_linear_bge_small"
 
 
 def test_load_config_reads_sentence_threshold_and_margin_file() -> None:

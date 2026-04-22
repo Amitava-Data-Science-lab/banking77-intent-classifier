@@ -106,6 +106,7 @@ def test_load_clinc150_dataset_reads_train_val_test_and_oos(tmp_path) -> None:
     assert "oos" in result.label_names
     assert result.metadata["dataset_type"] == "clinc150"
     assert result.metadata["oos_label"] == "oos"
+    assert result.metadata["dataset_task"] == "full_intent"
 
 
 def test_load_clinc150_dataset_can_exclude_oos(tmp_path) -> None:
@@ -150,6 +151,7 @@ def test_load_dataset_bundle_dispatches_to_clinc150(tmp_path) -> None:
     result = data.load_dataset_bundle(
         dataset_type="clinc150",
         dataset_name="clinc150",
+        dataset_task="full_intent",
         dataset_source=str(dataset_path),
         train_split="train",
         validation_split="val",
@@ -161,3 +163,28 @@ def test_load_dataset_bundle_dispatches_to_clinc150(tmp_path) -> None:
 
     assert result.metadata["dataset_type"] == "clinc150"
     assert result.validation_texts == ["cancel it", "who are you"]
+
+
+def test_load_clinc150_dataset_can_map_to_binary_oos_task(tmp_path) -> None:
+    dataset_path = tmp_path / "data_full.json"
+    dataset_path.write_text(
+        (
+            "{"
+            "\"train\": [[\"book a flight\", \"book_flight\"]], "
+            "\"val\": [[\"cancel it\", \"cancel_reservation\"]], "
+            "\"test\": [[\"reserve a table\", \"book_restaurant\"]], "
+            "\"oos_train\": [[\"what can you do\", \"oos\"]], "
+            "\"oos_val\": [[\"who are you\", \"oos\"]], "
+            "\"oos_test\": [[\"help me\", \"oos\"]]"
+            "}"
+        ),
+        encoding="utf-8",
+    )
+
+    result = data.load_clinc150_dataset(dataset_source=dataset_path, dataset_task="binary_oos")
+
+    assert result.label_names == ["not_oos", "oos"]
+    assert result.metadata["dataset_task"] == "binary_oos"
+    assert sorted(set(result.train_labels)) == [0, 1]
+    assert sorted(set(result.validation_labels)) == [0, 1]
+    assert sorted(set(result.test_labels)) == [0, 1]

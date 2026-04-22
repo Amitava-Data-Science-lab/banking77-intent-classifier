@@ -53,6 +53,7 @@ def run_search_pipeline(
     dataset = load_dataset_bundle(
         dataset_type=experiment_config.dataset_type,
         dataset_name=experiment_config.dataset_name,
+        dataset_task=experiment_config.dataset_task,
         dataset_source=str(experiment_config.dataset_source) if experiment_config.dataset_source is not None else None,
         train_split=experiment_config.train_split,
         validation_split=experiment_config.validation_split,
@@ -116,6 +117,8 @@ def run_search_pipeline(
         "macro_f1": evaluation.macro_f1,
         "top_5_accuracy": evaluation.top_5_accuracy,
         "oos_metrics": evaluation.oos_metrics,
+        "dataset_type": experiment_config.dataset_type,
+        "dataset_task": experiment_config.dataset_task,
         "oos_confidence_threshold": experiment_config.oos_confidence_threshold,
         "oos_margin_threshold": experiment_config.oos_margin_threshold,
         "best_cv_score": float(search.best_score_),

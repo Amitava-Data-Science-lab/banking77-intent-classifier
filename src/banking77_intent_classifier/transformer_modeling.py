@@ -234,6 +234,7 @@ def save_transformer_artifacts(
             "model_family": config.model_family,
             "dataset_type": config.dataset_type,
             "dataset_name": config.dataset_name,
+            "dataset_task": config.dataset_task,
             "dataset_source": str(config.dataset_source) if config.dataset_source is not None else None,
             "train_split": config.train_split,
             "validation_split": config.validation_split,

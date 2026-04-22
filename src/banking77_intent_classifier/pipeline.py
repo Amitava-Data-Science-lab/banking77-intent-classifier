@@ -71,6 +71,7 @@ def run_training_pipeline(
     dataset = load_dataset_bundle(
         dataset_type=config.dataset_type,
         dataset_name=config.dataset_name,
+        dataset_task=config.dataset_task,
         dataset_source=str(config.dataset_source) if config.dataset_source is not None else None,
         train_split=config.train_split,
         validation_split=config.validation_split,
@@ -114,6 +115,7 @@ def run_training_pipeline(
             "oos_metrics": evaluation.oos_metrics,
             "model_family": config.model_family,
             "dataset_type": config.dataset_type,
+            "dataset_task": config.dataset_task,
             "oos_confidence_threshold": config.oos_confidence_threshold,
             "oos_margin_threshold": None,
             "encoder_model_name": None,
@@ -194,6 +196,7 @@ def run_training_pipeline(
         "oos_metrics": evaluation.oos_metrics,
         "model_family": config.model_family,
         "dataset_type": config.dataset_type,
+        "dataset_task": config.dataset_task,
         "oos_confidence_threshold": config.oos_confidence_threshold,
         "oos_margin_threshold": config.oos_margin_threshold,
         "encoder_model_name": config.encoder.model_name if config.model_family.startswith("sentence_transformer_") else None,

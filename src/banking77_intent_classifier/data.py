@@ -31,6 +31,7 @@ class DatasetBundle:
 def load_dataset_bundle(
     dataset_type: str,
     dataset_name: str,
+    dataset_task: str,
     dataset_source: str | None,
     train_split: str,
     validation_split: str | None,
@@ -61,6 +62,7 @@ def load_dataset_bundle(
             validation_split=validation_split,
             test_split=test_split,
             include_oos=include_oos,
+            dataset_task=dataset_task,
         )
 
     raise ValueError(f"Unsupported dataset_type: {dataset_type}")
@@ -116,6 +118,7 @@ def load_clinc150_dataset(
     validation_split: str | None = "val",
     test_split: str = "test",
     include_oos: bool = True,
+    dataset_task: str = "full_intent",
 ) -> DatasetBundle:
     """Load CLINC150 from the UCI JSON export and normalize into integer labels."""
 
@@ -153,7 +156,7 @@ def load_clinc150_dataset(
 
     labels = sorted(
         {
-            str(label)
+            _normalize_clinc150_label(str(label), dataset_task=dataset_task)
             for split_name in required_splits
             for _, label in _get_clinc150_rows(
                 raw_dataset=raw_dataset,
@@ -169,22 +172,26 @@ def load_clinc150_dataset(
         split_name=train_split,
         label_to_id=label_to_id,
         include_oos=include_oos,
+        dataset_task=dataset_task,
     )
     validation_texts, validation_labels = _extract_clinc150_split(
         raw_dataset=raw_dataset,
         split_name=validation_split,
         label_to_id=label_to_id,
         include_oos=include_oos,
+        dataset_task=dataset_task,
     )
     test_texts, test_labels = _extract_clinc150_split(
         raw_dataset=raw_dataset,
         split_name=test_split,
         label_to_id=label_to_id,
         include_oos=include_oos,
+        dataset_task=dataset_task,
     )
 
     metadata = {
         "dataset_type": "clinc150",
+        "dataset_task": dataset_task,
         "dataset_source": str(dataset_path),
         "include_oos": include_oos,
         "oos_label": "oos" if include_oos and "oos" in label_to_id else None,
@@ -207,6 +214,7 @@ def _extract_clinc150_split(
     split_name: str | None,
     label_to_id: dict[str, int],
     include_oos: bool,
+    dataset_task: str,
 ) -> tuple[list[str], list[int]]:
     if split_name is None:
         return [], []
@@ -224,8 +232,9 @@ def _extract_clinc150_split(
             )
 
         text, label = row
+        normalized_label = _normalize_clinc150_label(str(label), dataset_task=dataset_task)
         texts.append(str(text))
-        labels.append(label_to_id[str(label)])
+        labels.append(label_to_id[normalized_label])
 
     return texts, labels
 
@@ -243,6 +252,12 @@ def _get_clinc150_rows(
 
 def _resolve_clinc150_oos_split_name(split_name: str) -> str:
     return f"oos_{split_name}"
+
+
+def _normalize_clinc150_label(label: str, dataset_task: str) -> str:
+    if dataset_task == "binary_oos":
+        return "oos" if label == "oos" else "not_oos"
+    return label
 
 
 def _load_banking77_from_parquet(dataset_name: str):
