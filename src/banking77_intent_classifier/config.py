@@ -52,6 +52,8 @@ class ClassifierConfig:
     knn_neighbors: int = 5
     knn_weights: str = "distance"
     knn_metric: str = "cosine"
+    probability_calibration_method: str = "sigmoid"
+    probability_calibration_cv: int = 5
 
 
 @dataclass(slots=True)
@@ -67,9 +69,15 @@ class ExperimentConfig:
     """Configuration for a full training run."""
 
     model_family: str
+    dataset_type: str
     dataset_name: str
+    dataset_source: Path | None
     train_split: str
+    validation_split: str | None
     test_split: str
+    include_oos: bool
+    oos_confidence_threshold: float | None
+    oos_margin_threshold: float | None
     artifacts_dir: Path
     reports_dir: Path
     text_column: str
@@ -146,9 +154,15 @@ def load_tuning_config(path: str | Path) -> TuningConfig:
 def _parse_experiment_config(raw: dict, base_dir: Path) -> ExperimentConfig:
     return ExperimentConfig(
         model_family=raw.get("model_family", "tfidf_svc"),
+        dataset_type=raw.get("dataset_type", "banking77"),
         dataset_name=raw["dataset_name"],
+        dataset_source=((base_dir / raw["dataset_source"]).resolve() if raw.get("dataset_source") else None),
         train_split=raw.get("train_split", "train"),
+        validation_split=raw.get("validation_split"),
         test_split=raw.get("test_split", "test"),
+        include_oos=raw.get("include_oos", True),
+        oos_confidence_threshold=raw.get("oos_confidence_threshold"),
+        oos_margin_threshold=raw.get("oos_margin_threshold"),
         artifacts_dir=(base_dir / raw["artifacts_dir"]).resolve(),
         reports_dir=(base_dir / raw["reports_dir"]).resolve(),
         text_column=raw.get("text_column", "text"),
@@ -184,6 +198,8 @@ def _parse_experiment_config(raw: dict, base_dir: Path) -> ExperimentConfig:
             knn_neighbors=raw["classifier"].get("knn_neighbors", 5),
             knn_weights=raw["classifier"].get("knn_weights", "distance"),
             knn_metric=raw["classifier"].get("knn_metric", "cosine"),
+            probability_calibration_method=raw["classifier"].get("probability_calibration_method", "sigmoid"),
+            probability_calibration_cv=raw["classifier"].get("probability_calibration_cv", 5),
         ),
         analysis=AnalysisConfig(
             top_k_confusions=raw["analysis"].get("top_k_confusions", 25),

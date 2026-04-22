@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 import numpy as np
 from scipy import sparse
+from sklearn.calibration import CalibratedClassifierCV
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.pipeline import Pipeline
@@ -29,16 +30,33 @@ def build_pipeline(
     tfidf_config: TfidfConfig,
     encoder_config: EncoderConfig,
     classifier_config: ClassifierConfig,
+    require_probabilities: bool = False,
 ) -> Pipeline:
     """Build a scikit-learn pipeline for the requested experiment family."""
 
-    classifier = LinearSVC(
+    if require_probabilities and model_family == "tfidf_svc":
+        raise ValueError(
+            "OOS confidence thresholds are currently supported for sentence-transformer models "
+            "and probability-capable classifiers, not TF-IDF + LinearSVC."
+        )
+
+    linear_classifier = LinearSVC(
         C=classifier_config.c,
         class_weight=classifier_config.class_weight,
         max_iter=classifier_config.max_iter,
         dual=classifier_config.dual,
         random_state=classifier_config.random_state,
     )
+    classifier = linear_classifier
+    if require_probabilities and model_family in {
+        "sentence_transformer_linear",
+        "sentence_transformer_linear_reranked",
+    }:
+        classifier = CalibratedClassifierCV(
+            estimator=linear_classifier,
+            method=classifier_config.probability_calibration_method,
+            cv=classifier_config.probability_calibration_cv,
+        )
 
     if model_family == "tfidf_svc":
         vectorizer_kwargs = {
@@ -126,15 +144,18 @@ def extract_weight_export(pipeline: Pipeline) -> WeightExport:
     """Extract feature names and linear SVM coefficients for persistence."""
 
     if "vectorizer" in pipeline.named_steps:
-        classifier: LinearSVC = pipeline.named_steps["classifier"]
-        coefficients = sparse.csr_matrix(classifier.coef_)
         vectorizer: TfidfVectorizer = pipeline.named_steps["vectorizer"]
         feature_names = vectorizer.get_feature_names_out()
+        classifier = pipeline.named_steps["classifier"]
+        coefficients = sparse.csr_matrix(classifier.coef_) if hasattr(classifier, "coef_") else None
     elif "encoder" in pipeline.named_steps:
         classifier = pipeline.named_steps["classifier"]
         if hasattr(classifier, "coef_"):
             coefficients = sparse.csr_matrix(classifier.coef_)
             embedding_dim = coefficients.shape[1]
+        elif hasattr(classifier, "calibrated_classifiers_") and classifier.calibrated_classifiers_:
+            coefficients = None
+            embedding_dim = classifier.calibrated_classifiers_[0].estimator.coef_.shape[1]
         elif hasattr(classifier, "_fit_X"):
             embedding_dim = classifier._fit_X.shape[1]
             coefficients = None
@@ -178,3 +199,47 @@ def predict_top_k_labels(pipeline: Pipeline, texts: list[str], k: int) -> np.nda
         return class_labels[top_indices]
 
     raise ValueError("Pipeline does not support ranked prediction outputs.")
+
+
+def predict_labels(
+    pipeline: Pipeline,
+    texts: list[str],
+    oos_label_id: int | None = None,
+    oos_confidence_threshold: float | None = None,
+    oos_margin_threshold: float | None = None,
+) -> np.ndarray:
+    """Predict labels, optionally forcing low-confidence predictions to OOS."""
+
+    if oos_confidence_threshold is None and oos_margin_threshold is None:
+        return pipeline.predict(texts)
+
+    if oos_label_id is None:
+        raise ValueError("An OOS label id is required when using OOS thresholds.")
+
+    if not hasattr(pipeline, "predict_proba"):
+        raise ValueError(
+            "OOS thresholds require a probability-capable pipeline. "
+            "Enable classifier probability calibration for linear models."
+        )
+
+    classifier = pipeline.named_steps["classifier"]
+    class_labels = classifier.classes_
+    probabilities = np.asarray(pipeline.predict_proba(texts))
+    max_probabilities = probabilities.max(axis=1)
+    predicted_indices = np.argmax(probabilities, axis=1)
+    predicted_labels = class_labels[predicted_indices].copy()
+    force_oos_mask = np.zeros(len(texts), dtype=bool)
+
+    if oos_confidence_threshold is not None:
+        force_oos_mask |= max_probabilities < oos_confidence_threshold
+
+    if oos_margin_threshold is not None:
+        sorted_probabilities = np.sort(probabilities, axis=1)
+        if sorted_probabilities.shape[1] > 1:
+            top_two_margins = sorted_probabilities[:, -1] - sorted_probabilities[:, -2]
+        else:
+            top_two_margins = sorted_probabilities[:, -1]
+        force_oos_mask |= top_two_margins < oos_margin_threshold
+
+    predicted_labels[force_oos_mask] = oos_label_id
+    return predicted_labels

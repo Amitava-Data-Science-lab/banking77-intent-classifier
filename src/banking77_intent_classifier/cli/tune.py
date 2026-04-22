@@ -12,12 +12,24 @@ def build_parser() -> argparse.ArgumentParser:
     """Create the CLI parser for search runs."""
 
     parser = argparse.ArgumentParser(
-        description="Run Banking77 TF-IDF + LinearSVC randomized hyperparameter search and export diagnostics."
+        description="Run randomized hyperparameter search for a dataset-configured intent classifier."
     )
     parser.add_argument(
         "--config",
         required=True,
         help="Path to the JSON tuning configuration file.",
+    )
+    parser.add_argument(
+        "--oos-threshold",
+        type=float,
+        default=None,
+        help="Override the config OOS confidence threshold for sentence-transformer tuning runs.",
+    )
+    parser.add_argument(
+        "--oos-margin-threshold",
+        type=float,
+        default=None,
+        help="Override the config OOS margin threshold for sentence-transformer tuning runs.",
     )
     return parser
 
@@ -27,7 +39,11 @@ def main() -> None:
 
     parser = build_parser()
     args = parser.parse_args()
-    summary = run_search_pipeline(args.config)
+    summary = run_search_pipeline(
+        args.config,
+        oos_threshold_override=args.oos_threshold,
+        oos_margin_threshold_override=args.oos_margin_threshold,
+    )
     print(json.dumps(summary, indent=2, sort_keys=True))
 
 

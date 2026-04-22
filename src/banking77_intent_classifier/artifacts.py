@@ -37,15 +37,23 @@ def save_model_artifacts(
         config.artifacts_dir / "model_metadata.json",
         {
             "model_family": config.model_family,
+            "dataset_type": config.dataset_type,
             "dataset_name": config.dataset_name,
+            "dataset_source": str(config.dataset_source) if config.dataset_source is not None else None,
             "train_split": config.train_split,
+            "validation_split": config.validation_split,
             "test_split": config.test_split,
+            "include_oos": config.include_oos,
+            "oos_confidence_threshold": config.oos_confidence_threshold,
+            "oos_margin_threshold": config.oos_margin_threshold,
             "text_column": config.text_column,
             "label_column": config.label_column,
             "random_seed": config.random_seed,
             "encoder_model_name": config.encoder.model_name if config.model_family.startswith("sentence_transformer_") else None,
             "reranker_model_name": config.reranker.model_name if config.reranker.enabled else None,
             "reranker_top_k": config.reranker.top_k if config.reranker.enabled else None,
+            "probability_calibration_method": config.classifier.probability_calibration_method,
+            "probability_calibration_cv": config.classifier.probability_calibration_cv,
             "num_labels": len(label_names),
             "num_features": int(
                 weight_export.coefficients.shape[1]
@@ -98,6 +106,7 @@ def save_evaluation_reports(
             "top_5_accuracy": evaluation.top_5_accuracy,
         },
     )
+    _write_json(config.reports_dir / "oos_metrics.json", evaluation.oos_metrics)
 
 
 def save_tuning_reports(

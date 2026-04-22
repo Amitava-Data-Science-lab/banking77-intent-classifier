@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "banking77-intent-classifier"
 version = "0.1.0"
-description = "Production-ready TF-IDF + LinearSVC intent classification baselines for Banking77."
+description = "Production-ready intent classification experiments across Banking77, CLINC150, and future datasets."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -34,6 +34,7 @@ dev = [
 [project.scripts]
 banking77-train = "banking77_intent_classifier.cli.main:main"
 banking77-tune = "banking77_intent_classifier.cli.tune:main"
+banking77-sweep-oos = "banking77_intent_classifier.cli.sweep_oos:main"
 
 [tool.setuptools]
 package-dir = { "" = "src" }

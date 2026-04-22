@@ -1,4 +1,4 @@
-"""Hyperparameter search workflow for Banking77 experiments."""
+"""Hyperparameter search workflow for dataset-driven experiments."""
 
 from __future__ import annotations
 
@@ -16,11 +16,12 @@ from banking77_intent_classifier.artifacts import (
     save_tuning_reports,
 )
 from banking77_intent_classifier.config import load_tuning_config
-from banking77_intent_classifier.data import load_banking77_dataset
+from banking77_intent_classifier.data import load_dataset_bundle
 from banking77_intent_classifier.evaluation import evaluate_predictions, save_confusion_matrix_figure
 from banking77_intent_classifier.modeling import (
     build_pipeline,
     extract_weight_export,
+    predict_labels,
     predict_top_k_labels,
 )
 from banking77_intent_classifier.pipeline import configure_logging
@@ -29,28 +30,42 @@ from banking77_intent_classifier.pipeline import configure_logging
 LOGGER = logging.getLogger(__name__)
 
 
-def run_search_pipeline(config_path: str | Path) -> dict:
+def run_search_pipeline(
+    config_path: str | Path,
+    oos_threshold_override: float | None = None,
+    oos_margin_threshold_override: float | None = None,
+) -> dict:
     """Run hyperparameter search on the train split and evaluate the best model on the test split."""
 
     configure_logging()
     tuning_config = load_tuning_config(config_path)
     experiment_config = tuning_config.experiment
+    if oos_threshold_override is not None:
+        experiment_config.oos_confidence_threshold = oos_threshold_override
+    if oos_margin_threshold_override is not None:
+        experiment_config.oos_margin_threshold = oos_margin_threshold_override
     LOGGER.info("Loaded tuning config from %s", config_path)
     LOGGER.info("Resolved experiment configuration: %s", asdict(experiment_config))
     LOGGER.info("Resolved search configuration: %s", asdict(tuning_config.search))
 
     ensure_output_directories(experiment_config)
 
-    dataset = load_banking77_dataset(
+    dataset = load_dataset_bundle(
+        dataset_type=experiment_config.dataset_type,
         dataset_name=experiment_config.dataset_name,
+        dataset_source=str(experiment_config.dataset_source) if experiment_config.dataset_source is not None else None,
         train_split=experiment_config.train_split,
+        validation_split=experiment_config.validation_split,
         test_split=experiment_config.test_split,
         text_column=experiment_config.text_column,
         label_column=experiment_config.label_column,
+        include_oos=experiment_config.include_oos,
     )
     LOGGER.info(
-        "Loaded dataset with %d train samples, %d test samples, and %d labels",
+        "Loaded %s dataset with %d train samples, %d validation samples, %d test samples, and %d labels",
+        experiment_config.dataset_type,
         len(dataset.train_texts),
+        len(dataset.validation_texts),
         len(dataset.test_texts),
         len(dataset.label_names),
     )
@@ -60,6 +75,10 @@ def run_search_pipeline(config_path: str | Path) -> dict:
         tfidf_config=experiment_config.tfidf,
         encoder_config=experiment_config.encoder,
         classifier_config=experiment_config.classifier,
+        require_probabilities=(
+            experiment_config.oos_confidence_threshold is not None
+            or experiment_config.oos_margin_threshold is not None
+        ),
     )
     search = _build_search(pipeline=pipeline, tuning_config=tuning_config)
     search.fit(dataset.train_texts, dataset.train_labels)
@@ -67,7 +86,14 @@ def run_search_pipeline(config_path: str | Path) -> dict:
     LOGGER.info("Best parameters: %s", search.best_params_)
 
     best_pipeline = search.best_estimator_
-    predictions = best_pipeline.predict(dataset.test_texts)
+    oos_label_id = dataset.label_names.index("oos") if "oos" in dataset.label_names else None
+    predictions = predict_labels(
+        best_pipeline,
+        dataset.test_texts,
+        oos_label_id=oos_label_id,
+        oos_confidence_threshold=experiment_config.oos_confidence_threshold,
+        oos_margin_threshold=experiment_config.oos_margin_threshold,
+    )
     top_5_predictions = predict_top_k_labels(best_pipeline, dataset.test_texts, k=5)
     weight_export = extract_weight_export(best_pipeline)
     evaluation = evaluate_predictions(
@@ -89,12 +115,16 @@ def run_search_pipeline(config_path: str | Path) -> dict:
         "accuracy": evaluation.accuracy,
         "macro_f1": evaluation.macro_f1,
         "top_5_accuracy": evaluation.top_5_accuracy,
+        "oos_metrics": evaluation.oos_metrics,
+        "oos_confidence_threshold": experiment_config.oos_confidence_threshold,
+        "oos_margin_threshold": experiment_config.oos_margin_threshold,
         "best_cv_score": float(search.best_score_),
         "best_params": search.best_params_,
         "artifacts_dir": str(experiment_config.artifacts_dir),
         "reports_dir": str(experiment_config.reports_dir),
         "top_confusions_rows": len(evaluation.top_confusions_df),
         "train_samples": len(dataset.train_texts),
+        "validation_samples": len(dataset.validation_texts),
         "test_samples": len(dataset.test_texts),
         "label_count": len(dataset.label_names),
     }

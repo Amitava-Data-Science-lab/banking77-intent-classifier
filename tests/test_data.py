@@ -38,6 +38,7 @@ def test_load_banking77_dataset_prefers_parquet(monkeypatch) -> None:
     result = data.load_banking77_dataset(
         dataset_name="PolyAI/banking77",
         train_split="train",
+        validation_split=None,
         test_split="test",
         text_column="text",
         label_column="label",
@@ -68,6 +69,7 @@ def test_load_banking77_dataset_falls_back_to_default_loader(monkeypatch) -> Non
     result = data.load_banking77_dataset(
         dataset_name="PolyAI/banking77",
         train_split="train",
+        validation_split=None,
         test_split="test",
         text_column="text",
         label_column="label",
@@ -77,3 +79,85 @@ def test_load_banking77_dataset_falls_back_to_default_loader(monkeypatch) -> Non
     assert result.test_labels == [1]
     assert result.label_names == ["balance", "card_arrival"]
     assert calls == ["parquet", "PolyAI/banking77"]
+
+
+def test_load_clinc150_dataset_reads_train_val_test_and_oos(tmp_path) -> None:
+    dataset_path = tmp_path / "data_full.json"
+    dataset_path.write_text(
+        (
+            "{"
+            "\"train\": [[\"book a flight\", \"book_flight\"]], "
+            "\"val\": [[\"cancel it\", \"cancel_reservation\"]], "
+            "\"test\": [[\"reserve a table\", \"book_restaurant\"]], "
+            "\"oos_train\": [[\"what can you do\", \"oos\"]], "
+            "\"oos_val\": [[\"who are you\", \"oos\"]], "
+            "\"oos_test\": [[\"help me\", \"oos\"]]"
+            "}"
+        ),
+        encoding="utf-8",
+    )
+
+    result = data.load_clinc150_dataset(dataset_source=dataset_path)
+
+    assert result.validation_texts == ["cancel it", "who are you"]
+    assert result.train_texts == ["book a flight", "what can you do"]
+    assert result.test_texts == ["reserve a table", "help me"]
+    assert len(result.label_names) == 4
+    assert "oos" in result.label_names
+    assert result.metadata["dataset_type"] == "clinc150"
+    assert result.metadata["oos_label"] == "oos"
+
+
+def test_load_clinc150_dataset_can_exclude_oos(tmp_path) -> None:
+    dataset_path = tmp_path / "data_full.json"
+    dataset_path.write_text(
+        (
+            "{"
+            "\"train\": [[\"book a flight\", \"book_flight\"]], "
+            "\"val\": [[\"cancel it\", \"cancel_reservation\"]], "
+            "\"test\": [[\"reserve a table\", \"book_restaurant\"]], "
+            "\"oos_train\": [[\"what can you do\", \"oos\"]], "
+            "\"oos_val\": [[\"who are you\", \"oos\"]], "
+            "\"oos_test\": [[\"help me\", \"oos\"]]"
+            "}"
+        ),
+        encoding="utf-8",
+    )
+
+    result = data.load_clinc150_dataset(dataset_source=dataset_path, include_oos=False)
+
+    assert "oos" not in result.label_names
+    assert len(result.train_texts) == 1
+    assert len(result.test_texts) == 1
+
+
+def test_load_dataset_bundle_dispatches_to_clinc150(tmp_path) -> None:
+    dataset_path = tmp_path / "data_full.json"
+    dataset_path.write_text(
+        (
+            "{"
+            "\"train\": [[\"book a flight\", \"book_flight\"]], "
+            "\"val\": [[\"cancel it\", \"cancel_reservation\"]], "
+            "\"test\": [[\"reserve a table\", \"book_restaurant\"]], "
+            "\"oos_train\": [[\"what can you do\", \"oos\"]], "
+            "\"oos_val\": [[\"who are you\", \"oos\"]], "
+            "\"oos_test\": [[\"help me\", \"oos\"]]"
+            "}"
+        ),
+        encoding="utf-8",
+    )
+
+    result = data.load_dataset_bundle(
+        dataset_type="clinc150",
+        dataset_name="clinc150",
+        dataset_source=str(dataset_path),
+        train_split="train",
+        validation_split="val",
+        test_split="test",
+        text_column="text",
+        label_column="label",
+        include_oos=True,
+    )
+
+    assert result.metadata["dataset_type"] == "clinc150"
+    assert result.validation_texts == ["cancel it", "who are you"]

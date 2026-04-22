@@ -1,0 +1,46 @@
+{
+  "model_family": "sentence_transformer_linear",
+  "dataset_type": "clinc150",
+  "dataset_name": "clinc150",
+  "dataset_source": "../data/clinc150/data_full.json",
+  "train_split": "train",
+  "validation_split": "val",
+  "test_split": "test",
+  "include_oos": true,
+  "oos_confidence_threshold": 0.5,
+  "oos_margin_threshold": 0.0,
+  "artifacts_dir": "../artifacts/clinc150/champion",
+  "reports_dir": "../reports/clinc150/champion",
+  "text_column": "text",
+  "label_column": "label",
+  "random_seed": 42,
+  "tfidf": {
+    "lowercase": true,
+    "strip_accents": "unicode",
+    "normalization": "none",
+    "ngram_range": [1, 2],
+    "min_df": 2,
+    "max_df": 0.98,
+    "sublinear_tf": true,
+    "max_features": 50000
+  },
+  "encoder": {
+    "model_name": "sentence-transformers/all-mpnet-base-v2",
+    "batch_size": 32,
+    "normalize_embeddings": true,
+    "device": null
+  },
+  "classifier": {
+    "c": 1.0,
+    "class_weight": "balanced",
+    "max_iter": 5000,
+    "dual": true,
+    "random_state": 42,
+    "probability_calibration_method": "sigmoid",
+    "probability_calibration_cv": 5
+  },
+  "analysis": {
+    "top_k_confusions": 25,
+    "top_k_features_per_class": 20
+  }
+}

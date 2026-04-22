@@ -1,4 +1,4 @@
-"""End-to-end orchestration for Banking77 model training."""
+"""End-to-end orchestration for dataset-driven model training."""
 
 from __future__ import annotations
 
@@ -12,11 +12,12 @@ from banking77_intent_classifier.artifacts import (
     save_model_artifacts,
 )
 from banking77_intent_classifier.config import load_config
-from banking77_intent_classifier.data import load_banking77_dataset
+from banking77_intent_classifier.data import load_dataset_bundle
 from banking77_intent_classifier.evaluation import evaluate_predictions, save_confusion_matrix_figure
 from banking77_intent_classifier.modeling import (
     build_pipeline,
     extract_weight_export,
+    predict_labels,
     predict_top_k_labels,
     train_pipeline,
 )
@@ -39,26 +40,44 @@ def configure_logging() -> None:
     )
 
 
-def run_training_pipeline(config_path: str | Path) -> dict:
+def run_training_pipeline(
+    config_path: str | Path,
+    oos_threshold_override: float | None = None,
+    oos_margin_threshold_override: float | None = None,
+    output_suffix: str | None = None,
+) -> dict:
     """Run a complete experiment and return a compact summary."""
 
     configure_logging()
     config = load_config(config_path)
+    if oos_threshold_override is not None:
+        config.oos_confidence_threshold = oos_threshold_override
+    if oos_margin_threshold_override is not None:
+        config.oos_margin_threshold = oos_margin_threshold_override
+    if output_suffix is not None:
+        config.artifacts_dir = config.artifacts_dir.parent / f"{config.artifacts_dir.name}_{output_suffix}"
+        config.reports_dir = config.reports_dir.parent / f"{config.reports_dir.name}_{output_suffix}"
     LOGGER.info("Loaded config from %s", config_path)
     LOGGER.info("Resolved configuration: %s", asdict(config))
 
     ensure_output_directories(config)
 
-    dataset = load_banking77_dataset(
+    dataset = load_dataset_bundle(
+        dataset_type=config.dataset_type,
         dataset_name=config.dataset_name,
+        dataset_source=str(config.dataset_source) if config.dataset_source is not None else None,
         train_split=config.train_split,
+        validation_split=config.validation_split,
         test_split=config.test_split,
         text_column=config.text_column,
         label_column=config.label_column,
+        include_oos=config.include_oos,
     )
     LOGGER.info(
-        "Loaded dataset with %d train samples, %d test samples, and %d labels",
+        "Loaded %s dataset with %d train samples, %d validation samples, %d test samples, and %d labels",
+        config.dataset_type,
         len(dataset.train_texts),
+        len(dataset.validation_texts),
         len(dataset.test_texts),
         len(dataset.label_names),
     )
@@ -68,9 +87,19 @@ def run_training_pipeline(config_path: str | Path) -> dict:
         tfidf_config=config.tfidf,
         encoder_config=config.encoder,
         classifier_config=config.classifier,
+        require_probabilities=(
+            config.oos_confidence_threshold is not None or config.oos_margin_threshold is not None
+        ),
     )
     trained_pipeline = train_pipeline(pipeline, dataset.train_texts, dataset.train_labels)
-    predictions = trained_pipeline.predict(dataset.test_texts)
+    oos_label_id = dataset.label_names.index("oos") if "oos" in dataset.label_names else None
+    predictions = predict_labels(
+        trained_pipeline,
+        dataset.test_texts,
+        oos_label_id=oos_label_id,
+        oos_confidence_threshold=config.oos_confidence_threshold,
+        oos_margin_threshold=config.oos_margin_threshold,
+    )
     top_k = config.reranker.top_k if config.reranker.enabled else 5
     top_5_predictions = predict_top_k_labels(trained_pipeline, dataset.test_texts, k=top_k)
 
@@ -100,13 +129,18 @@ def run_training_pipeline(config_path: str | Path) -> dict:
         "accuracy": evaluation.accuracy,
         "macro_f1": evaluation.macro_f1,
         "top_5_accuracy": evaluation.top_5_accuracy,
+        "oos_metrics": evaluation.oos_metrics,
         "model_family": config.model_family,
+        "dataset_type": config.dataset_type,
+        "oos_confidence_threshold": config.oos_confidence_threshold,
+        "oos_margin_threshold": config.oos_margin_threshold,
         "encoder_model_name": config.encoder.model_name if config.model_family.startswith("sentence_transformer_") else None,
         "reranker_model_name": config.reranker.model_name if config.reranker.enabled else None,
         "artifacts_dir": str(config.artifacts_dir),
         "reports_dir": str(config.reports_dir),
         "top_confusions_rows": len(evaluation.top_confusions_df),
         "train_samples": len(dataset.train_texts),
+        "validation_samples": len(dataset.validation_texts),
         "test_samples": len(dataset.test_texts),
         "label_count": len(dataset.label_names),
     }

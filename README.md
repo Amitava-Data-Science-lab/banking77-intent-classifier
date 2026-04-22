@@ -1,16 +1,17 @@
 # Banking77 Intent Classifier
 
-Production-ready intent classification experiments for the [Banking77](https://huggingface.co/datasets/PolyAI/banking77) dataset, from TF-IDF baselines through sentence-transformer models.
+Production-ready intent classification experiments for [Banking77](https://huggingface.co/datasets/PolyAI/banking77), CLINC150, and future datasets, from TF-IDF baselines through sentence-transformer models.
 
 This repository is designed to be a clean public GitHub repo rather than a notebook experiment. It focuses on:
 
 - reusable package structure
+- dataset-pluggable experiment entrypoints
 - deterministic training configuration
 - artifact persistence for production usage
 - confusion-matrix analysis to inspect failure modes
 - reusable loading and inference helpers
 
-## Current Best
+## Current Best For Banking77
 
 The frozen champion model is:
 
@@ -21,7 +22,7 @@ The frozen champion model is:
 - macro F1: `0.9307`
 - top-5 accuracy: `0.9893`
 
-This is the selected production model for the repository.
+This is the selected production model for the Banking77 track in the repository.
 
 Run it with:
 
@@ -33,6 +34,29 @@ It writes to:
 
 - `artifacts/champion/`
 - `reports/champion/`
+
+## Dataset Workflow
+
+The project now supports dataset-specific model selection. The intended workflow for a new dataset is:
+
+1. run a TF-IDF + LinearSVC baseline
+2. run a lemmatized sparse baseline
+3. run a small sparse sweep or randomized search
+4. run sentence-transformer linear baselines
+5. optionally compare KNN or reranking
+6. promote a dataset-specific champion only after comparison
+
+This keeps the Banking77 evaluation ladder reusable for CLINC150 and future datasets instead of assuming one champion generalizes everywhere.
+
+## Supported Datasets
+
+- `banking77`
+  - source: Hugging Face `PolyAI/banking77`
+  - splits: `train`, `test`
+- `clinc150`
+  - source: local UCI-style `data_full.json`
+  - splits: `train`, `val`, `test`
+  - default behavior: include `oos` as a normal class, giving a 151-class setup
 
 ## Model Families
 
@@ -55,7 +79,7 @@ py -3.11 -m venv .venv
 pip install -e ".[dev]"
 ```
 
-### 2. Train the frozen champion
+### 2. Train the frozen Banking77 champion
 
 ```powershell
 banking77-train --config configs/champion.json
@@ -124,9 +148,26 @@ This keeps the champion candidate generator (`BAAI/bge-small-en-v1.5 + LinearSVC
 
 This experiment is kept for reference only. It significantly underperformed the frozen champion and is not recommended for production use.
 
+## CLINC150 Quick Start
+
+1. Download `data_full.json` from the [UCI CLINC150 page](https://archive.ics.uci.edu/dataset/570/clinc150).
+2. Place it at `data/clinc150/data_full.json` relative to the repo root.
+3. Run the staged experiment configs instead of jumping directly to one model:
+
+```powershell
+banking77-train --config configs/clinc150_tfidf_svc.json
+banking77-train --config configs/clinc150_tfidf_svc_lemmatized.json
+banking77-tune --config configs/clinc150_tfidf_svc_random_search.json
+banking77-train --config configs/clinc150_sentence_transformer_linear.json
+banking77-train --config configs/clinc150_sentence_transformer_knn.json
+banking77-train --config configs/clinc150_sentence_transformer_linear_bge_small.json
+```
+
+CLINC150 outputs are namespaced under `artifacts/clinc150/` and `reports/clinc150/` so they do not overwrite Banking77 experiments.
+
 ## Outputs
 
-Each run writes production-friendly artifacts to the configured `artifacts/` and `reports/` directories. For the frozen champion alias, that means `artifacts/champion/` and `reports/champion/`.
+Each run writes production-friendly artifacts to the configured `artifacts/` and `reports/` directories. Banking77 and CLINC150 configs use separate directories so each dataset can maintain its own experiment history and future champion alias.
 
 Champion outputs include:
 
@@ -180,7 +221,8 @@ reports/champion/
 - All important outputs are persisted for reproducibility and deployment.
 - The code is packaged for reuse instead of being tied to a single notebook.
 - Model diagnostics are written to disk so the same training job can support CI, batch training, or future orchestration.
-- The recommended production config is `configs/champion.json`.
+- The recommended Banking77 production config is `configs/champion.json`.
+- CLINC150 should be evaluated through its full config ladder before freezing a champion alias.
 
 ## Publishing
 

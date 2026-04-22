@@ -18,6 +18,7 @@ class EvaluationArtifacts:
     accuracy: float
     macro_f1: float
     top_5_accuracy: float
+    oos_metrics: dict
     classification_report: dict
     confusion_matrix_df: pd.DataFrame
     normalized_confusion_matrix_df: pd.DataFrame
@@ -53,6 +54,12 @@ def evaluate_predictions(
         y_true=y_true,
         top_k_predicted_labels=top_k_predicted_labels,
     )
+    oos_metrics = _build_oos_metrics(
+        y_true=y_true,
+        y_pred=y_pred,
+        label_names=label_names,
+        report=report,
+    )
     report["summary_metrics"] = {
         "accuracy": accuracy,
         "macro_f1": macro_f1,
@@ -80,6 +87,7 @@ def evaluate_predictions(
         accuracy=accuracy,
         macro_f1=macro_f1,
         top_5_accuracy=top_5_accuracy,
+        oos_metrics=oos_metrics,
         classification_report=report,
         confusion_matrix_df=confusion_df,
         normalized_confusion_matrix_df=normalized_df,
@@ -176,3 +184,54 @@ def _top_features_by_class(
             )
 
     return pd.DataFrame(rows)
+
+
+def _build_oos_metrics(
+    y_true: list[int],
+    y_pred: list[int],
+    label_names: list[str],
+    report: dict,
+) -> dict:
+    if "oos" not in label_names:
+        return {
+            "available": False,
+            "label": None,
+        }
+
+    oos_label_id = label_names.index("oos")
+    true_oos_predicted_oos = sum(
+        true_label == oos_label_id and predicted_label == oos_label_id
+        for true_label, predicted_label in zip(y_true, y_pred, strict=True)
+    )
+    true_oos_predicted_in_scope = sum(
+        true_label == oos_label_id and predicted_label != oos_label_id
+        for true_label, predicted_label in zip(y_true, y_pred, strict=True)
+    )
+    true_in_scope_predicted_oos = sum(
+        true_label != oos_label_id and predicted_label == oos_label_id
+        for true_label, predicted_label in zip(y_true, y_pred, strict=True)
+    )
+    true_in_scope_predicted_in_scope = sum(
+        true_label != oos_label_id and predicted_label != oos_label_id
+        for true_label, predicted_label in zip(y_true, y_pred, strict=True)
+    )
+
+    oos_support = int(report["oos"]["support"])
+    in_scope_support = len(y_true) - oos_support
+
+    return {
+        "available": True,
+        "label": "oos",
+        "precision": float(report["oos"]["precision"]),
+        "recall": float(report["oos"]["recall"]),
+        "f1": float(report["oos"]["f1-score"]),
+        "support": oos_support,
+        "miss_rate": float(1.0 - report["oos"]["recall"]),
+        "in_scope_false_oos_rate": (
+            float(true_in_scope_predicted_oos / in_scope_support) if in_scope_support else 0.0
+        ),
+        "true_oos_predicted_oos": true_oos_predicted_oos,
+        "true_oos_predicted_in_scope": true_oos_predicted_in_scope,
+        "true_in_scope_predicted_oos": true_in_scope_predicted_oos,
+        "true_in_scope_predicted_in_scope": true_in_scope_predicted_in_scope,
+    }

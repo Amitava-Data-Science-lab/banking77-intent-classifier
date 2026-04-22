@@ -1,4 +1,4 @@
-"""Reusable package for Banking77 intent classification baselines."""
+"""Reusable package for dataset-driven intent classification experiments."""
 
 from banking77_intent_classifier.inference import (
     IntentPrediction,

@@ -2,6 +2,7 @@ from banking77_intent_classifier.config import ClassifierConfig, EncoderConfig, 
 from banking77_intent_classifier.modeling import (
     build_pipeline,
     extract_weight_export,
+    predict_labels,
     predict_top_k_labels,
     train_pipeline,
 )
@@ -86,3 +87,72 @@ def test_build_pipeline_creates_sentence_transformer_knn_family() -> None:
 
     assert "encoder" in pipeline.named_steps
     assert "classifier" in pipeline.named_steps
+
+
+def test_build_pipeline_rejects_probability_threshold_for_tfidf_svc() -> None:
+    try:
+        build_pipeline(
+            model_family="tfidf_svc",
+            tfidf_config=TfidfConfig(),
+            encoder_config=EncoderConfig(),
+            classifier_config=ClassifierConfig(),
+            require_probabilities=True,
+        )
+    except ValueError as error:
+        assert "currently supported for sentence-transformer models" in str(error)
+    else:
+        raise AssertionError("Expected ValueError when requiring probabilities for tfidf_svc.")
+
+
+def test_predict_labels_forces_low_probability_predictions_to_oos() -> None:
+    class DummyClassifier:
+        classes_ = [0, 1, 2]
+
+    class DummyPipeline:
+        named_steps = {"classifier": DummyClassifier()}
+
+        def predict(self, texts):
+            raise AssertionError("predict should not be used when oos_confidence_threshold is set")
+
+        def predict_proba(self, texts):
+            return [
+                [0.2, 0.7, 0.1],
+                [0.2, 0.25, 0.55],
+                [0.2, 0.25, 0.28],
+            ]
+
+    predictions = predict_labels(
+        DummyPipeline(),
+        ["a", "b", "c"],
+        oos_label_id=2,
+        oos_confidence_threshold=0.3,
+    )
+
+    assert predictions.tolist() == [1, 2, 2]
+
+
+def test_predict_labels_forces_low_margin_predictions_to_oos() -> None:
+    class DummyClassifier:
+        classes_ = [0, 1, 2]
+
+    class DummyPipeline:
+        named_steps = {"classifier": DummyClassifier()}
+
+        def predict(self, texts):
+            raise AssertionError("predict should not be used when OOS thresholds are set")
+
+        def predict_proba(self, texts):
+            return [
+                [0.1, 0.8, 0.1],
+                [0.1, 0.52, 0.38],
+                [0.1, 0.36, 0.34],
+            ]
+
+    predictions = predict_labels(
+        DummyPipeline(),
+        ["a", "b", "c"],
+        oos_label_id=2,
+        oos_margin_threshold=0.15,
+    )
+
+    assert predictions.tolist() == [1, 2, 2]

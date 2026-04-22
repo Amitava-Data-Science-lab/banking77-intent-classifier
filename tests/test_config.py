@@ -6,6 +6,7 @@ from banking77_intent_classifier.config import load_config, load_tuning_config
 def test_load_config_reads_tfidf_svc_file() -> None:
     config = load_config(Path("configs/tfidf_svc.json"))
 
+    assert config.dataset_type == "banking77"
     assert config.dataset_name == "PolyAI/banking77"
     assert config.tfidf.ngram_range == (1, 2)
     assert config.classifier.max_iter == 5000
@@ -88,3 +89,61 @@ def test_load_config_reads_reranked_file() -> None:
     assert config.encoder.model_name == "BAAI/bge-small-en-v1.5"
     assert config.reranker.enabled is True
     assert config.reranker.top_k == 5
+
+
+def test_load_config_reads_clinc150_file() -> None:
+    config = load_config(Path("configs/clinc150_tfidf_svc.json"))
+
+    assert config.dataset_type == "clinc150"
+    assert config.dataset_name == "clinc150"
+    assert config.dataset_source.name == "data_full.json"
+    assert config.validation_split == "val"
+    assert config.include_oos is True
+
+
+def test_load_tuning_config_reads_clinc150_file() -> None:
+    config = load_tuning_config(Path("configs/clinc150_tfidf_svc_random_search.json"))
+
+    assert config.experiment.dataset_type == "clinc150"
+    assert config.experiment.validation_split == "val"
+    assert config.experiment.include_oos is True
+    assert config.search.search_type == "randomized"
+
+
+def test_load_config_reads_clinc150_sentence_threshold_file() -> None:
+    config = load_config(Path("configs/clinc150_sentence_transformer_linear_bge_small_oos_threshold_03.json"))
+
+    assert config.model_family == "sentence_transformer_linear"
+    assert config.oos_confidence_threshold == 0.3
+    assert config.oos_margin_threshold is None
+    assert config.classifier.probability_calibration_method == "sigmoid"
+    assert config.classifier.probability_calibration_cv == 5
+
+
+def test_load_config_reads_clinc150_sentence_mpnet_file() -> None:
+    config = load_config(Path("configs/clinc150_sentence_transformer_linear_mpnet_base_v2.json"))
+
+    assert config.model_family == "sentence_transformer_linear"
+    assert config.dataset_type == "clinc150"
+    assert config.encoder.model_name == "sentence-transformers/all-mpnet-base-v2"
+    assert config.artifacts_dir.name == "sentence_transformer_linear_mpnet_base_v2"
+    assert config.reports_dir.name == "sentence_transformer_linear_mpnet_base_v2"
+
+
+def test_load_config_reads_sentence_threshold_and_margin_file() -> None:
+    config = load_config(
+        Path("configs/clinc150_sentence_transformer_linear_bge_small_oos_threshold_03_margin_01.json")
+    )
+
+    assert config.oos_confidence_threshold == 0.3
+    assert config.oos_margin_threshold == 0.1
+
+
+def test_load_config_reads_clinc150_champion_file() -> None:
+    config = load_config(Path("configs/clinc150_champion.json"))
+
+    assert config.model_family == "sentence_transformer_linear"
+    assert config.encoder.model_name == "sentence-transformers/all-mpnet-base-v2"
+    assert config.oos_confidence_threshold == 0.5
+    assert config.oos_margin_threshold == 0.0
+    assert config.artifacts_dir.name == "champion"
