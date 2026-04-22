@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -265,34 +266,56 @@ def _build_trainer(dataset: DatasetBundle, config: ExperimentConfig):
         max_length=config.transformer.max_length,
     )
 
-    training_args = TrainingArguments(
-        output_dir=str(config.artifacts_dir / "training"),
-        learning_rate=config.transformer.learning_rate,
-        num_train_epochs=config.transformer.num_train_epochs,
-        per_device_train_batch_size=config.transformer.train_batch_size,
-        per_device_eval_batch_size=config.transformer.eval_batch_size,
-        weight_decay=config.transformer.weight_decay,
-        warmup_ratio=config.transformer.warmup_ratio,
-        save_strategy=config.transformer.save_strategy,
-        eval_strategy=config.transformer.evaluation_strategy,
-        load_best_model_at_end=config.transformer.load_best_model_at_end,
-        metric_for_best_model=config.transformer.metric_for_best_model,
-        greater_is_better=config.transformer.greater_is_better,
-        fp16=config.transformer.fp16,
-        bf16=config.transformer.bf16,
-        report_to=[],
-        logging_strategy="epoch",
-    )
+    training_args_kwargs = {
+        "output_dir": str(config.artifacts_dir / "training"),
+        "learning_rate": config.transformer.learning_rate,
+        "num_train_epochs": config.transformer.num_train_epochs,
+        "per_device_train_batch_size": config.transformer.train_batch_size,
+        "per_device_eval_batch_size": config.transformer.eval_batch_size,
+        "weight_decay": config.transformer.weight_decay,
+        "warmup_ratio": config.transformer.warmup_ratio,
+        "save_strategy": config.transformer.save_strategy,
+        "load_best_model_at_end": config.transformer.load_best_model_at_end,
+        "metric_for_best_model": config.transformer.metric_for_best_model,
+        "greater_is_better": config.transformer.greater_is_better,
+        "fp16": config.transformer.fp16,
+        "bf16": config.transformer.bf16,
+        "report_to": [],
+        "logging_strategy": "epoch",
+    }
+    training_arguments_signature = inspect.signature(TrainingArguments.__init__)
+    if "evaluation_strategy" in training_arguments_signature.parameters:
+        training_args_kwargs["evaluation_strategy"] = config.transformer.evaluation_strategy
+    elif "eval_strategy" in training_arguments_signature.parameters:
+        training_args_kwargs["eval_strategy"] = config.transformer.evaluation_strategy
+    else:
+        raise TypeError(
+            "Unsupported transformers TrainingArguments signature: neither "
+            "`evaluation_strategy` nor `eval_strategy` is available."
+        )
 
-    trainer = Trainer(
-        model=model,
-        args=training_args,
-        train_dataset=train_dataset,
-        eval_dataset=eval_dataset if len(dataset.validation_texts) > 0 else None,
-        tokenizer=tokenizer,
-        data_collator=DataCollatorWithPadding(tokenizer=tokenizer),
-        compute_metrics=_build_compute_metrics(dataset.label_names),
-    )
+    training_args = TrainingArguments(**training_args_kwargs)
+
+    trainer_kwargs = {
+        "model": model,
+        "args": training_args,
+        "train_dataset": train_dataset,
+        "eval_dataset": eval_dataset if len(dataset.validation_texts) > 0 else None,
+        "data_collator": DataCollatorWithPadding(tokenizer=tokenizer),
+        "compute_metrics": _build_compute_metrics(dataset.label_names),
+    }
+    trainer_signature = inspect.signature(Trainer.__init__)
+    if "processing_class" in trainer_signature.parameters:
+        trainer_kwargs["processing_class"] = tokenizer
+    elif "tokenizer" in trainer_signature.parameters:
+        trainer_kwargs["tokenizer"] = tokenizer
+    else:
+        raise TypeError(
+            "Unsupported transformers Trainer signature: neither `processing_class` "
+            "nor `tokenizer` is available."
+        )
+
+    trainer = Trainer(**trainer_kwargs)
     return tokenizer, model, trainer
 
 
