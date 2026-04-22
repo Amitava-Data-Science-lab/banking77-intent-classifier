@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+import math
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -212,7 +213,7 @@ def save_transformer_artifacts(
             "train_batch_size": config.transformer.train_batch_size,
             "eval_batch_size": config.transformer.eval_batch_size,
             "weight_decay": config.transformer.weight_decay,
-            "warmup_ratio": config.transformer.warmup_ratio,
+            "warmup_steps": _resolve_warmup_steps(dataset=dataset, config=config),
             "save_strategy": config.transformer.save_strategy,
             "evaluation_strategy": config.transformer.evaluation_strategy,
             "metric_for_best_model": config.transformer.metric_for_best_model,
@@ -228,6 +229,20 @@ def save_transformer_artifacts(
             "validation_metrics_by_threshold": transformer_artifacts.validation_metrics_by_threshold,
         },
     )
+
+
+def _resolve_warmup_steps(dataset: DatasetBundle, config: ExperimentConfig) -> int:
+    """Resolve warmup steps while remaining backward-compatible with ratio-based configs."""
+
+    if config.transformer.warmup_steps > 0:
+        return config.transformer.warmup_steps
+
+    if config.transformer.warmup_ratio and config.transformer.warmup_ratio > 0:
+        steps_per_epoch = math.ceil(len(dataset.train_texts) / config.transformer.train_batch_size)
+        total_steps = max(1, math.ceil(steps_per_epoch * config.transformer.num_train_epochs))
+        return max(1, math.ceil(total_steps * config.transformer.warmup_ratio))
+
+    return 0
 
 
 def _build_trainer(dataset: DatasetBundle, config: ExperimentConfig):
@@ -273,7 +288,7 @@ def _build_trainer(dataset: DatasetBundle, config: ExperimentConfig):
         "per_device_train_batch_size": config.transformer.train_batch_size,
         "per_device_eval_batch_size": config.transformer.eval_batch_size,
         "weight_decay": config.transformer.weight_decay,
-        "warmup_ratio": config.transformer.warmup_ratio,
+        "warmup_steps": _resolve_warmup_steps(dataset=dataset, config=config),
         "save_strategy": config.transformer.save_strategy,
         "load_best_model_at_end": config.transformer.load_best_model_at_end,
         "metric_for_best_model": config.transformer.metric_for_best_model,

@@ -75,7 +75,8 @@ class TransformerConfig:
     train_batch_size: int = 16
     eval_batch_size: int = 32
     weight_decay: float = 0.01
-    warmup_ratio: float = 0.1
+    warmup_steps: int = 0
+    warmup_ratio: float | None = None
     save_strategy: str = "epoch"
     evaluation_strategy: str = "epoch"
     load_best_model_at_end: bool = True
@@ -216,7 +217,8 @@ def _parse_experiment_config(raw: dict, base_dir: Path) -> ExperimentConfig:
             train_batch_size=raw.get("transformer", {}).get("train_batch_size", 16),
             eval_batch_size=raw.get("transformer", {}).get("eval_batch_size", 32),
             weight_decay=raw.get("transformer", {}).get("weight_decay", 0.01),
-            warmup_ratio=raw.get("transformer", {}).get("warmup_ratio", 0.1),
+            warmup_steps=raw.get("transformer", {}).get("warmup_steps", 0),
+            warmup_ratio=raw.get("transformer", {}).get("warmup_ratio"),
             save_strategy=raw.get("transformer", {}).get("save_strategy", "epoch"),
             evaluation_strategy=raw.get("transformer", {}).get("evaluation_strategy", "epoch"),
             load_best_model_at_end=raw.get("transformer", {}).get("load_best_model_at_end", True),
