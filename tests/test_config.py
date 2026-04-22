@@ -135,8 +135,11 @@ def test_load_config_reads_clinc150_transformer_mpnet_file() -> None:
 
     assert config.model_family == "transformer_sequence_classifier"
     assert config.dataset_type == "clinc150"
-    assert config.transformer.model_name == "microsoft/mpnet-base"
+    assert config.transformer.model_name == "sentence-transformers/all-mpnet-base-v2"
     assert config.transformer.load_best_model_at_end is False
+    assert config.transformer.learning_rate == 1e-5
+    assert config.transformer.num_train_epochs == 5.0
+    assert config.transformer.warmup_ratio == 0.05
     assert config.transformer.threshold_candidates == [0.001, 0.005, 0.01, 0.02, 0.05]
     assert config.transformer.threshold_selection_metric == "macro_f1"
 

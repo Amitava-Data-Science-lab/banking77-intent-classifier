@@ -23,14 +23,14 @@
     "max_features": 50000
   },
   "transformer": {
-    "model_name": "microsoft/mpnet-base",
+    "model_name": "sentence-transformers/all-mpnet-base-v2",
     "max_length": 128,
-    "learning_rate": 2e-5,
-    "num_train_epochs": 3.0,
+    "learning_rate": 1e-5,
+    "num_train_epochs": 5.0,
     "train_batch_size": 16,
     "eval_batch_size": 32,
     "weight_decay": 0.01,
-    "warmup_ratio": 0.1,
+    "warmup_ratio": 0.05,
     "save_strategy": "epoch",
     "evaluation_strategy": "epoch",
     "load_best_model_at_end": false,
