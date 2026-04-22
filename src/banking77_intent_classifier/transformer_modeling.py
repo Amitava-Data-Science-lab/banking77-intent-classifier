@@ -27,10 +27,13 @@ class TransformerTrainingArtifacts:
     trainer: Any
     selected_oos_threshold: float | None
     selected_distance_threshold: float | None
+    selected_energy_threshold: float | None
     validation_metrics_by_threshold: list[dict[str, Any]]
     threshold_selection_metadata: dict[str, Any] = field(default_factory=dict)
     validation_distance_metrics_by_threshold: list[dict[str, Any]] = field(default_factory=list)
     distance_selection_metadata: dict[str, Any] = field(default_factory=dict)
+    validation_energy_metrics_by_threshold: list[dict[str, Any]] = field(default_factory=list)
+    energy_selection_metadata: dict[str, Any] = field(default_factory=dict)
     known_intent_centroids: np.ndarray | None = None
     known_intent_centroid_label_ids: list[int] = field(default_factory=list)
     known_intent_centroid_label_names: list[str] = field(default_factory=list)
@@ -47,8 +50,10 @@ def train_transformer_classifier(
 
     selected_oos_threshold = config.oos_confidence_threshold
     selected_distance_threshold: float | None = None
+    selected_energy_threshold: float | None = None
     validation_metrics_by_threshold: list[dict[str, Any]] = []
     validation_distance_metrics_by_threshold: list[dict[str, Any]] = []
+    validation_energy_metrics_by_threshold: list[dict[str, Any]] = []
     threshold_selection_metadata: dict[str, Any] = {
         "strategy": "manual_override" if selected_oos_threshold is not None else None,
         "selected_threshold": selected_oos_threshold,
@@ -56,6 +61,10 @@ def train_transformer_classifier(
     distance_selection_metadata: dict[str, Any] = {
         "strategy": "disabled" if not config.transformer.oos_distance_enabled else None,
         "selected_distance_threshold": None,
+    }
+    energy_selection_metadata: dict[str, Any] = {
+        "strategy": "disabled" if not config.transformer.oos_energy_enabled else None,
+        "selected_energy_threshold": None,
     }
     known_intent_centroids: np.ndarray | None = None
     known_intent_centroid_label_ids: list[int] = []
@@ -162,16 +171,71 @@ def train_transformer_classifier(
         )
         selected_distance_threshold = distance_selection_metadata["selected_distance_threshold"]
 
+    if config.transformer.oos_energy_enabled:
+        if config.transformer.oos_energy_fixed_probability_source != "selected_validation_threshold":
+            raise ValueError(
+                "Unsupported oos_energy_fixed_probability_source: "
+                f"{config.transformer.oos_energy_fixed_probability_source}"
+            )
+        if selected_oos_threshold is None:
+            raise ValueError(
+                "Energy-based OOS scoring requires a fixed probability threshold. "
+                "Enable threshold selection or set oos_confidence_threshold explicitly."
+            )
+        if config.transformer.oos_energy_candidate_source != "validation_energies":
+            raise ValueError(
+                "Unsupported oos_energy_candidate_source: "
+                f"{config.transformer.oos_energy_candidate_source}"
+            )
+
+        validation_logits = predict_logits(
+            trainer=trainer,
+            texts=dataset.validation_texts,
+            labels=dataset.validation_labels,
+            tokenizer=tokenizer,
+            transformer_config=config.transformer,
+        )
+        validation_probabilities = _softmax(validation_logits)
+        validation_energies = compute_energy_scores(
+            logits=validation_logits,
+            temperature=config.transformer.oos_energy_temperature,
+        )
+        energy_threshold_candidates = build_energy_threshold_candidates(
+            energies=validation_energies
+        )
+        (
+            validation_energy_metrics_by_threshold,
+            energy_selection_metadata,
+        ) = evaluate_energy_threshold_candidates(
+            probabilities=validation_probabilities,
+            energy_scores=validation_energies,
+            y_true=dataset.validation_labels,
+            label_names=dataset.label_names,
+            fixed_oos_confidence_threshold=selected_oos_threshold,
+            energy_threshold_candidates=energy_threshold_candidates,
+            analysis_top_k_confusions=config.analysis.top_k_confusions,
+            analysis_top_k_features_per_class=config.analysis.top_k_features_per_class,
+            selection_metric=config.transformer.threshold_selection_metric,
+            selection_strategy=config.transformer.oos_energy_selection_strategy,
+            max_in_scope_false_oos_rate=config.transformer.threshold_max_in_scope_false_oos_rate,
+            macro_f1_tolerance_ladder=config.transformer.threshold_macro_f1_tolerance_ladder,
+            fallback_strategy=config.transformer.threshold_fallback_strategy,
+        )
+        selected_energy_threshold = energy_selection_metadata["selected_energy_threshold"]
+
     return TransformerTrainingArtifacts(
         model=model,
         tokenizer=tokenizer,
         trainer=trainer,
         selected_oos_threshold=selected_oos_threshold,
         selected_distance_threshold=selected_distance_threshold,
+        selected_energy_threshold=selected_energy_threshold,
         validation_metrics_by_threshold=validation_metrics_by_threshold,
         threshold_selection_metadata=threshold_selection_metadata,
         validation_distance_metrics_by_threshold=validation_distance_metrics_by_threshold,
         distance_selection_metadata=distance_selection_metadata,
+        validation_energy_metrics_by_threshold=validation_energy_metrics_by_threshold,
+        energy_selection_metadata=energy_selection_metadata,
         known_intent_centroids=known_intent_centroids,
         known_intent_centroid_label_ids=known_intent_centroid_label_ids,
         known_intent_centroid_label_names=known_intent_centroid_label_names,
@@ -195,6 +259,25 @@ def predict_probabilities(
     )
     predictions = trainer.predict(prediction_dataset)
     return _softmax(predictions.predictions)
+
+
+def predict_logits(
+    trainer,
+    texts: list[str],
+    labels: list[int],
+    tokenizer,
+    transformer_config: TransformerConfig,
+) -> np.ndarray:
+    """Predict raw logits from a fine-tuned transformer."""
+
+    prediction_dataset = _build_hf_dataset(
+        texts=texts,
+        labels=labels,
+        tokenizer=tokenizer,
+        max_length=transformer_config.max_length,
+    )
+    predictions = trainer.predict(prediction_dataset)
+    return predictions.predictions
 
 
 def predict_embeddings(
@@ -251,6 +334,8 @@ def evaluate_transformer_predictions(
     analysis_top_k_features_per_class: int,
     nearest_known_intent_distances: np.ndarray | None = None,
     oos_distance_threshold: float | None = None,
+    energy_scores: np.ndarray | None = None,
+    oos_energy_threshold: float | None = None,
 ) -> EvaluationArtifacts:
     """Evaluate transformer probabilities using the shared reporting format."""
 
@@ -260,6 +345,8 @@ def evaluate_transformer_predictions(
         oos_confidence_threshold=oos_confidence_threshold,
         nearest_known_intent_distances=nearest_known_intent_distances,
         oos_distance_threshold=oos_distance_threshold,
+        energy_scores=energy_scores,
+        oos_energy_threshold=oos_energy_threshold,
     )
     top_k_predictions = top_k_from_probabilities(probabilities=probabilities, k=5)
     return evaluate_predictions(
@@ -280,6 +367,8 @@ def apply_probability_threshold(
     oos_confidence_threshold: float | None,
     nearest_known_intent_distances: np.ndarray | None = None,
     oos_distance_threshold: float | None = None,
+    energy_scores: np.ndarray | None = None,
+    oos_energy_threshold: float | None = None,
 ) -> np.ndarray:
     """Apply an inference-time OOS threshold to class probabilities."""
 
@@ -287,6 +376,7 @@ def apply_probability_threshold(
     if (
         oos_confidence_threshold is None
         and oos_distance_threshold is None
+        and oos_energy_threshold is None
     ) or "oos" not in label_names:
         return predicted_labels
 
@@ -302,6 +392,10 @@ def apply_probability_threshold(
                 "nearest_known_intent_distances are required when using oos_distance_threshold."
             )
         oos_mask |= nearest_known_intent_distances > oos_distance_threshold
+    if oos_energy_threshold is not None:
+        if energy_scores is None:
+            raise ValueError("energy_scores are required when using oos_energy_threshold.")
+        oos_mask |= energy_scores > oos_energy_threshold
     predicted_labels[oos_mask] = oos_label_id
     return predicted_labels
 
@@ -372,6 +466,33 @@ def build_distance_threshold_candidates(
 
     quantiles = np.linspace(0.0, 1.0, num=max_candidates)
     sampled = np.quantile(unique_distances, quantiles)
+    return np.unique(sampled).tolist()
+
+
+def compute_energy_scores(
+    logits: np.ndarray,
+    temperature: float = 1.0,
+) -> np.ndarray:
+    """Compute energy scores from model logits."""
+
+    scaled_logits = logits / temperature
+    max_logits = np.max(scaled_logits, axis=1, keepdims=True)
+    logsumexp = np.log(np.sum(np.exp(scaled_logits - max_logits), axis=1)) + max_logits.squeeze(axis=1)
+    return -temperature * logsumexp
+
+
+def build_energy_threshold_candidates(
+    energies: np.ndarray,
+    max_candidates: int = 200,
+) -> list[float]:
+    """Build deterministic energy-threshold candidates from validation energies."""
+
+    unique_energies = np.unique(np.asarray(energies, dtype=np.float64))
+    if unique_energies.size <= max_candidates:
+        return unique_energies.tolist()
+
+    quantiles = np.linspace(0.0, 1.0, num=max_candidates)
+    sampled = np.quantile(unique_energies, quantiles)
     return np.unique(sampled).tolist()
 
 
@@ -517,6 +638,84 @@ def evaluate_distance_threshold_candidates(
     return ranked_rows, metadata
 
 
+def evaluate_energy_threshold_candidates(
+    probabilities: np.ndarray,
+    energy_scores: np.ndarray,
+    y_true: list[int],
+    label_names: list[str],
+    fixed_oos_confidence_threshold: float,
+    energy_threshold_candidates: list[float],
+    analysis_top_k_confusions: int,
+    analysis_top_k_features_per_class: int,
+    selection_metric: str,
+    selection_strategy: str = "oos_aware_constrained",
+    max_in_scope_false_oos_rate: float = 0.03,
+    macro_f1_tolerance_ladder: list[float] | None = None,
+    fallback_strategy: str = "best_macro_f1",
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Evaluate energy thresholds with a fixed probability threshold."""
+
+    rows: list[dict[str, Any]] = []
+    for energy_threshold in energy_threshold_candidates:
+        evaluation = evaluate_transformer_predictions(
+            probabilities=probabilities,
+            y_true=y_true,
+            label_names=label_names,
+            oos_confidence_threshold=fixed_oos_confidence_threshold,
+            energy_scores=energy_scores,
+            oos_energy_threshold=energy_threshold,
+            analysis_top_k_confusions=analysis_top_k_confusions,
+            analysis_top_k_features_per_class=analysis_top_k_features_per_class,
+        )
+        rows.append(
+            {
+                "threshold": energy_threshold,
+                "energy_threshold": energy_threshold,
+                "fixed_oos_confidence_threshold": fixed_oos_confidence_threshold,
+                "accuracy": evaluation.accuracy,
+                "macro_f1": evaluation.macro_f1,
+                "top_5_accuracy": evaluation.top_5_accuracy,
+                "oos_f1": evaluation.oos_metrics.get("f1", 0.0),
+                "in_scope_false_oos_rate": evaluation.oos_metrics.get(
+                    "in_scope_false_oos_rate", 0.0
+                ),
+                "oos_metrics": evaluation.oos_metrics,
+            }
+        )
+
+    if selection_strategy == "oos_aware_constrained":
+        ranked_rows, metadata = _select_oos_aware_threshold_candidates(
+            rows=rows,
+            selection_metric=selection_metric,
+            max_in_scope_false_oos_rate=max_in_scope_false_oos_rate,
+            macro_f1_tolerance_ladder=macro_f1_tolerance_ladder or [0.01, 0.02, 0.03, 0.04, 0.05],
+            fallback_strategy=fallback_strategy,
+        )
+    else:
+        ranked_rows = sorted(
+            rows,
+            key=lambda row: _threshold_sort_key(row=row, selection_metric=selection_metric),
+            reverse=True,
+        )
+        selected_threshold = ranked_rows[0]["energy_threshold"] if ranked_rows else None
+        for index, row in enumerate(ranked_rows):
+            row["selection_eligible"] = index == 0
+            row["eligibility_reason"] = (
+                "selected_by_metric" if index == 0 else "ranked_below_selected_threshold"
+            )
+        metadata = {
+            "strategy": "metric",
+            "selection_metric": selection_metric,
+            "selected_threshold": selected_threshold,
+            "fallback_used": False,
+        }
+
+    metadata["selected_energy_threshold"] = metadata.pop("selected_threshold", None)
+    metadata["fixed_oos_confidence_threshold"] = fixed_oos_confidence_threshold
+    metadata["energy_threshold_candidates"] = energy_threshold_candidates
+    return ranked_rows, metadata
+
+
 def save_transformer_artifacts(
     transformer_artifacts: TransformerTrainingArtifacts,
     dataset: DatasetBundle,
@@ -551,6 +750,7 @@ def save_transformer_artifacts(
             "include_oos": config.include_oos,
             "oos_confidence_threshold": transformer_artifacts.selected_oos_threshold,
             "oos_distance_threshold": transformer_artifacts.selected_distance_threshold,
+            "oos_energy_threshold": transformer_artifacts.selected_energy_threshold,
             "text_column": config.text_column,
             "label_column": config.label_column,
             "random_seed": config.random_seed,
@@ -578,6 +778,12 @@ def save_transformer_artifacts(
             "oos_distance_selection_strategy": config.transformer.oos_distance_selection_strategy,
             "oos_fixed_probability_source": config.transformer.oos_fixed_probability_source,
             "distance_selection_metadata": transformer_artifacts.distance_selection_metadata,
+            "oos_energy_enabled": config.transformer.oos_energy_enabled,
+            "oos_energy_temperature": config.transformer.oos_energy_temperature,
+            "oos_energy_candidate_source": config.transformer.oos_energy_candidate_source,
+            "oos_energy_selection_strategy": config.transformer.oos_energy_selection_strategy,
+            "oos_energy_fixed_probability_source": config.transformer.oos_energy_fixed_probability_source,
+            "energy_selection_metadata": transformer_artifacts.energy_selection_metadata,
             "pooled_representation": "cls_last_hidden_state",
             "distance_embedding_normalized": config.transformer.oos_distance_metric == "cosine",
             "known_intent_centroid_label_ids": transformer_artifacts.known_intent_centroid_label_ids,
@@ -590,10 +796,13 @@ def save_transformer_artifacts(
         {
             "selected_oos_threshold": transformer_artifacts.selected_oos_threshold,
             "selected_distance_threshold": transformer_artifacts.selected_distance_threshold,
+            "selected_energy_threshold": transformer_artifacts.selected_energy_threshold,
             "validation_metrics_by_threshold": transformer_artifacts.validation_metrics_by_threshold,
             "selection_metadata": transformer_artifacts.threshold_selection_metadata,
             "validation_metrics_by_distance_threshold": transformer_artifacts.validation_distance_metrics_by_threshold,
             "distance_selection_metadata": transformer_artifacts.distance_selection_metadata,
+            "validation_metrics_by_energy_threshold": transformer_artifacts.validation_energy_metrics_by_threshold,
+            "energy_selection_metadata": transformer_artifacts.energy_selection_metadata,
         },
     )
 

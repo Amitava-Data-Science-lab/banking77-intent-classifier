@@ -2,10 +2,13 @@ import numpy as np
 
 from banking77_intent_classifier.transformer_modeling import (
     _select_oos_aware_threshold_candidates,
+    build_energy_threshold_candidates,
     build_distance_threshold_candidates,
     build_known_intent_centroids,
     apply_probability_threshold,
+    compute_energy_scores,
     compute_nearest_known_intent_distances,
+    evaluate_energy_threshold_candidates,
     evaluate_oos_threshold_candidates,
     evaluate_distance_threshold_candidates,
     top_k_from_probabilities,
@@ -159,6 +162,26 @@ def test_apply_probability_threshold_supports_distance_or_probability_rule() -> 
     assert predictions.tolist() == [0, 2, 0]
 
 
+def test_apply_probability_threshold_supports_energy_or_probability_rule() -> None:
+    probabilities = np.array(
+        [
+            [0.95, 0.03, 0.02],
+            [0.70, 0.20, 0.10],
+            [0.85, 0.10, 0.05],
+        ]
+    )
+    energies = np.array([-5.0, -1.0, -4.0], dtype=np.float32)
+    predictions = apply_probability_threshold(
+        probabilities=probabilities,
+        label_names=["intent_a", "intent_b", "oos"],
+        oos_confidence_threshold=0.2,
+        energy_scores=energies,
+        oos_energy_threshold=-2.0,
+    )
+
+    assert predictions.tolist() == [0, 2, 0]
+
+
 def test_evaluate_distance_threshold_candidates_uses_joint_rule() -> None:
     probabilities = np.array(
         [
@@ -188,5 +211,60 @@ def test_evaluate_distance_threshold_candidates_uses_joint_rule() -> None:
     )
 
     assert metadata["selected_distance_threshold"] == rows[0]["distance_threshold"]
+    assert metadata["fixed_oos_confidence_threshold"] == 0.05
+    assert len(rows) == 2
+
+
+def test_compute_energy_scores_matches_expected_ordering() -> None:
+    logits = np.array(
+        [
+            [4.0, 1.0, -1.0],
+            [0.1, 0.0, -0.1],
+        ],
+        dtype=np.float32,
+    )
+
+    energies = compute_energy_scores(logits=logits, temperature=1.0)
+
+    assert energies.shape == (2,)
+    assert energies[0] < energies[1]
+
+
+def test_build_energy_threshold_candidates_uses_validation_energies_deterministically() -> None:
+    energies = np.array([-4.0, -2.0, -2.0, -1.0], dtype=np.float32)
+    candidates = build_energy_threshold_candidates(energies=energies, max_candidates=10)
+
+    assert candidates == [-4.0, -2.0, -1.0]
+
+
+def test_evaluate_energy_threshold_candidates_uses_joint_rule() -> None:
+    probabilities = np.array(
+        [
+            [0.95, 0.03, 0.02],
+            [0.60, 0.30, 0.10],
+            [0.75, 0.10, 0.15],
+            [0.40, 0.20, 0.40],
+        ]
+    )
+    energies = np.array([-5.0, -1.0, -4.0, -0.5], dtype=np.float32)
+    y_true = [0, 2, 1, 2]
+
+    rows, metadata = evaluate_energy_threshold_candidates(
+        probabilities=probabilities,
+        energy_scores=energies,
+        y_true=y_true,
+        label_names=["intent_a", "intent_b", "oos"],
+        fixed_oos_confidence_threshold=0.05,
+        energy_threshold_candidates=[-2.0, -0.75],
+        analysis_top_k_confusions=10,
+        analysis_top_k_features_per_class=5,
+        selection_metric="macro_f1",
+        selection_strategy="oos_aware_constrained",
+        max_in_scope_false_oos_rate=0.5,
+        macro_f1_tolerance_ladder=[0.5],
+        fallback_strategy="best_macro_f1",
+    )
+
+    assert metadata["selected_energy_threshold"] == rows[0]["energy_threshold"]
     assert metadata["fixed_oos_confidence_threshold"] == 0.05
     assert len(rows) == 2

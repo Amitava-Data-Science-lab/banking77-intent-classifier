@@ -97,6 +97,11 @@ class TransformerConfig:
     oos_distance_candidate_source: str = "validation_distances"
     oos_distance_selection_strategy: str = "oos_aware_constrained"
     oos_fixed_probability_source: str = "selected_validation_threshold"
+    oos_energy_enabled: bool = False
+    oos_energy_temperature: float = 1.0
+    oos_energy_candidate_source: str = "validation_energies"
+    oos_energy_selection_strategy: str = "oos_aware_constrained"
+    oos_energy_fixed_probability_source: str = "selected_validation_threshold"
 
 
 @dataclass(slots=True)
@@ -250,6 +255,11 @@ def _parse_experiment_config(raw: dict, base_dir: Path) -> ExperimentConfig:
             oos_distance_candidate_source=raw.get("transformer", {}).get("oos_distance_candidate_source", "validation_distances"),
             oos_distance_selection_strategy=raw.get("transformer", {}).get("oos_distance_selection_strategy", "oos_aware_constrained"),
             oos_fixed_probability_source=raw.get("transformer", {}).get("oos_fixed_probability_source", "selected_validation_threshold"),
+            oos_energy_enabled=raw.get("transformer", {}).get("oos_energy_enabled", False),
+            oos_energy_temperature=raw.get("transformer", {}).get("oos_energy_temperature", 1.0),
+            oos_energy_candidate_source=raw.get("transformer", {}).get("oos_energy_candidate_source", "validation_energies"),
+            oos_energy_selection_strategy=raw.get("transformer", {}).get("oos_energy_selection_strategy", "oos_aware_constrained"),
+            oos_energy_fixed_probability_source=raw.get("transformer", {}).get("oos_energy_fixed_probability_source", "selected_validation_threshold"),
         ),
         reranker=RerankerConfig(
             model_name=raw.get("reranker", {}).get("model_name", "cross-encoder/ms-marco-MiniLM-L-6-v2"),

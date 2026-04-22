@@ -163,6 +163,19 @@ def test_load_config_reads_clinc150_transformer_mpnet_distance_file() -> None:
     assert config.artifacts_dir.name == "transformer_sequence_classifier_mpnet_distance"
 
 
+def test_load_config_reads_clinc150_transformer_mpnet_energy_file() -> None:
+    config = load_config(Path("configs/clinc150_transformer_sequence_classifier_mpnet_energy.json"))
+
+    assert config.model_family == "transformer_sequence_classifier"
+    assert config.dataset_task == "full_intent"
+    assert config.transformer.oos_energy_enabled is True
+    assert config.transformer.oos_energy_temperature == 1.0
+    assert config.transformer.oos_energy_candidate_source == "validation_energies"
+    assert config.transformer.oos_energy_selection_strategy == "oos_aware_constrained"
+    assert config.transformer.oos_energy_fixed_probability_source == "selected_validation_threshold"
+    assert config.artifacts_dir.name == "transformer_sequence_classifier_mpnet_energy"
+
+
 def test_load_config_reads_clinc150_binary_oos_tfidf_file() -> None:
     config = load_config(Path("configs/clinc150_binary_oos_tfidf_svc_lemmatized.json"))
 
