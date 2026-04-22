@@ -27,7 +27,9 @@ from banking77_intent_classifier.reranking import (
     rerank_top_k_predictions,
 )
 from banking77_intent_classifier.transformer_modeling import (
+    compute_nearest_known_intent_distances,
     evaluate_transformer_predictions,
+    predict_embeddings,
     predict_probabilities,
     save_transformer_artifacts,
     train_transformer_classifier,
@@ -93,6 +95,7 @@ def run_training_pipeline(
         transformer_artifacts = train_transformer_classifier(dataset=dataset, config=config)
         # The threshold remains an evaluation-time rule even for fine-tuned models.
         config.oos_confidence_threshold = transformer_artifacts.selected_oos_threshold
+        test_nearest_distances = None
         test_probabilities = predict_probabilities(
             trainer=transformer_artifacts.trainer,
             texts=dataset.test_texts,
@@ -100,11 +103,28 @@ def run_training_pipeline(
             tokenizer=transformer_artifacts.tokenizer,
             transformer_config=config.transformer,
         )
+        if (
+            config.transformer.oos_distance_enabled
+            and transformer_artifacts.known_intent_centroids is not None
+        ):
+            test_embeddings = predict_embeddings(
+                model=transformer_artifacts.model,
+                tokenizer=transformer_artifacts.tokenizer,
+                texts=dataset.test_texts,
+                transformer_config=config.transformer,
+            )
+            test_nearest_distances = compute_nearest_known_intent_distances(
+                embeddings=test_embeddings,
+                known_intent_centroids=transformer_artifacts.known_intent_centroids,
+                distance_metric=config.transformer.oos_distance_metric,
+            )
         evaluation = evaluate_transformer_predictions(
             probabilities=test_probabilities,
             y_true=dataset.test_labels,
             label_names=dataset.label_names,
             oos_confidence_threshold=config.oos_confidence_threshold,
+            nearest_known_intent_distances=test_nearest_distances,
+            oos_distance_threshold=transformer_artifacts.selected_distance_threshold,
             analysis_top_k_confusions=config.analysis.top_k_confusions,
             analysis_top_k_features_per_class=config.analysis.top_k_features_per_class,
         )
@@ -117,9 +137,12 @@ def run_training_pipeline(
             "dataset_type": config.dataset_type,
             "dataset_task": config.dataset_task,
             "oos_confidence_threshold": config.oos_confidence_threshold,
+            "oos_distance_threshold": transformer_artifacts.selected_distance_threshold,
             "oos_margin_threshold": None,
             "encoder_model_name": None,
             "transformer_model_name": config.transformer.model_name,
+            "distance_metric": config.transformer.oos_distance_metric if config.transformer.oos_distance_enabled else None,
+            "distance_candidate_source": config.transformer.oos_distance_candidate_source if config.transformer.oos_distance_enabled else None,
             "reranker_model_name": None,
             "artifacts_dir": str(config.artifacts_dir),
             "reports_dir": str(config.reports_dir),
@@ -129,6 +152,7 @@ def run_training_pipeline(
             "test_samples": len(dataset.test_texts),
             "label_count": len(dataset.label_names),
             "validation_threshold_candidates": transformer_artifacts.validation_metrics_by_threshold,
+            "validation_distance_threshold_candidates": transformer_artifacts.validation_distance_metrics_by_threshold,
         }
         save_transformer_artifacts(
             transformer_artifacts=transformer_artifacts,

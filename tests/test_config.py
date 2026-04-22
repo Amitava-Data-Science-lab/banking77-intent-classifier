@@ -147,6 +147,20 @@ def test_load_config_reads_clinc150_transformer_mpnet_file() -> None:
     assert config.transformer.threshold_max_in_scope_false_oos_rate == 0.03
     assert config.transformer.threshold_macro_f1_tolerance_ladder == [0.01, 0.02, 0.03, 0.04, 0.05]
     assert config.transformer.threshold_fallback_strategy == "best_macro_f1"
+    assert config.transformer.oos_distance_enabled is False
+
+
+def test_load_config_reads_clinc150_transformer_mpnet_distance_file() -> None:
+    config = load_config(Path("configs/clinc150_transformer_sequence_classifier_mpnet_distance.json"))
+
+    assert config.model_family == "transformer_sequence_classifier"
+    assert config.dataset_task == "full_intent"
+    assert config.transformer.oos_distance_enabled is True
+    assert config.transformer.oos_distance_metric == "cosine"
+    assert config.transformer.oos_distance_candidate_source == "validation_distances"
+    assert config.transformer.oos_distance_selection_strategy == "oos_aware_constrained"
+    assert config.transformer.oos_fixed_probability_source == "selected_validation_threshold"
+    assert config.artifacts_dir.name == "transformer_sequence_classifier_mpnet_distance"
 
 
 def test_load_config_reads_clinc150_binary_oos_tfidf_file() -> None:

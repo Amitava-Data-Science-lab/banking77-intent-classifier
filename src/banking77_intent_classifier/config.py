@@ -92,6 +92,11 @@ class TransformerConfig:
         default_factory=lambda: [0.01, 0.02, 0.03, 0.04, 0.05]
     )
     threshold_fallback_strategy: str = "best_macro_f1"
+    oos_distance_enabled: bool = False
+    oos_distance_metric: str = "cosine"
+    oos_distance_candidate_source: str = "validation_distances"
+    oos_distance_selection_strategy: str = "oos_aware_constrained"
+    oos_fixed_probability_source: str = "selected_validation_threshold"
 
 
 @dataclass(slots=True)
@@ -240,6 +245,11 @@ def _parse_experiment_config(raw: dict, base_dir: Path) -> ExperimentConfig:
             threshold_max_in_scope_false_oos_rate=raw.get("transformer", {}).get("threshold_max_in_scope_false_oos_rate", 0.03),
             threshold_macro_f1_tolerance_ladder=raw.get("transformer", {}).get("threshold_macro_f1_tolerance_ladder", [0.01, 0.02, 0.03, 0.04, 0.05]),
             threshold_fallback_strategy=raw.get("transformer", {}).get("threshold_fallback_strategy", "best_macro_f1"),
+            oos_distance_enabled=raw.get("transformer", {}).get("oos_distance_enabled", False),
+            oos_distance_metric=raw.get("transformer", {}).get("oos_distance_metric", "cosine"),
+            oos_distance_candidate_source=raw.get("transformer", {}).get("oos_distance_candidate_source", "validation_distances"),
+            oos_distance_selection_strategy=raw.get("transformer", {}).get("oos_distance_selection_strategy", "oos_aware_constrained"),
+            oos_fixed_probability_source=raw.get("transformer", {}).get("oos_fixed_probability_source", "selected_validation_threshold"),
         ),
         reranker=RerankerConfig(
             model_name=raw.get("reranker", {}).get("model_name", "cross-encoder/ms-marco-MiniLM-L-6-v2"),

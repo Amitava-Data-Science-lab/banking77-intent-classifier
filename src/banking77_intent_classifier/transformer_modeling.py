@@ -26,8 +26,14 @@ class TransformerTrainingArtifacts:
     tokenizer: Any
     trainer: Any
     selected_oos_threshold: float | None
+    selected_distance_threshold: float | None
     validation_metrics_by_threshold: list[dict[str, Any]]
     threshold_selection_metadata: dict[str, Any] = field(default_factory=dict)
+    validation_distance_metrics_by_threshold: list[dict[str, Any]] = field(default_factory=list)
+    distance_selection_metadata: dict[str, Any] = field(default_factory=dict)
+    known_intent_centroids: np.ndarray | None = None
+    known_intent_centroid_label_ids: list[int] = field(default_factory=list)
+    known_intent_centroid_label_names: list[str] = field(default_factory=list)
 
 
 def train_transformer_classifier(
@@ -40,11 +46,20 @@ def train_transformer_classifier(
     trainer.train()
 
     selected_oos_threshold = config.oos_confidence_threshold
+    selected_distance_threshold: float | None = None
     validation_metrics_by_threshold: list[dict[str, Any]] = []
+    validation_distance_metrics_by_threshold: list[dict[str, Any]] = []
     threshold_selection_metadata: dict[str, Any] = {
         "strategy": "manual_override" if selected_oos_threshold is not None else None,
         "selected_threshold": selected_oos_threshold,
     }
+    distance_selection_metadata: dict[str, Any] = {
+        "strategy": "disabled" if not config.transformer.oos_distance_enabled else None,
+        "selected_distance_threshold": None,
+    }
+    known_intent_centroids: np.ndarray | None = None
+    known_intent_centroid_label_ids: list[int] = []
+    known_intent_centroid_label_names: list[str] = []
 
     if selected_oos_threshold is None and config.transformer.threshold_candidates:
         validation_probabilities = predict_probabilities(
@@ -69,13 +84,97 @@ def train_transformer_classifier(
         )
         selected_oos_threshold = threshold_selection_metadata["selected_threshold"]
 
+    if config.transformer.oos_distance_enabled:
+        if config.transformer.oos_fixed_probability_source != "selected_validation_threshold":
+            raise ValueError(
+                "Unsupported oos_fixed_probability_source: "
+                f"{config.transformer.oos_fixed_probability_source}"
+            )
+        if selected_oos_threshold is None:
+            raise ValueError(
+                "Distance-based OOS scoring requires a fixed probability threshold. "
+                "Enable threshold selection or set oos_confidence_threshold explicitly."
+            )
+        if config.transformer.oos_distance_metric != "cosine":
+            raise ValueError(
+                f"Unsupported oos_distance_metric: {config.transformer.oos_distance_metric}"
+            )
+        if config.transformer.oos_distance_candidate_source != "validation_distances":
+            raise ValueError(
+                "Unsupported oos_distance_candidate_source: "
+                f"{config.transformer.oos_distance_candidate_source}"
+            )
+
+        train_embeddings = predict_embeddings(
+            model=model,
+            tokenizer=tokenizer,
+            texts=dataset.train_texts,
+            transformer_config=config.transformer,
+        )
+        known_intent_centroids, known_intent_centroid_label_ids = build_known_intent_centroids(
+            embeddings=train_embeddings,
+            labels=dataset.train_labels,
+            label_names=dataset.label_names,
+            distance_metric=config.transformer.oos_distance_metric,
+        )
+        known_intent_centroid_label_names = [
+            dataset.label_names[label_id] for label_id in known_intent_centroid_label_ids
+        ]
+
+        validation_embeddings = predict_embeddings(
+            model=model,
+            tokenizer=tokenizer,
+            texts=dataset.validation_texts,
+            transformer_config=config.transformer,
+        )
+        validation_nearest_distances = compute_nearest_known_intent_distances(
+            embeddings=validation_embeddings,
+            known_intent_centroids=known_intent_centroids,
+            distance_metric=config.transformer.oos_distance_metric,
+        )
+        distance_threshold_candidates = build_distance_threshold_candidates(
+            distances=validation_nearest_distances
+        )
+        validation_probabilities = predict_probabilities(
+            trainer=trainer,
+            texts=dataset.validation_texts,
+            labels=dataset.validation_labels,
+            tokenizer=tokenizer,
+            transformer_config=config.transformer,
+        )
+        (
+            validation_distance_metrics_by_threshold,
+            distance_selection_metadata,
+        ) = evaluate_distance_threshold_candidates(
+            probabilities=validation_probabilities,
+            nearest_known_intent_distances=validation_nearest_distances,
+            y_true=dataset.validation_labels,
+            label_names=dataset.label_names,
+            fixed_oos_confidence_threshold=selected_oos_threshold,
+            distance_threshold_candidates=distance_threshold_candidates,
+            analysis_top_k_confusions=config.analysis.top_k_confusions,
+            analysis_top_k_features_per_class=config.analysis.top_k_features_per_class,
+            selection_metric=config.transformer.threshold_selection_metric,
+            selection_strategy=config.transformer.oos_distance_selection_strategy,
+            max_in_scope_false_oos_rate=config.transformer.threshold_max_in_scope_false_oos_rate,
+            macro_f1_tolerance_ladder=config.transformer.threshold_macro_f1_tolerance_ladder,
+            fallback_strategy=config.transformer.threshold_fallback_strategy,
+        )
+        selected_distance_threshold = distance_selection_metadata["selected_distance_threshold"]
+
     return TransformerTrainingArtifacts(
         model=model,
         tokenizer=tokenizer,
         trainer=trainer,
         selected_oos_threshold=selected_oos_threshold,
+        selected_distance_threshold=selected_distance_threshold,
         validation_metrics_by_threshold=validation_metrics_by_threshold,
         threshold_selection_metadata=threshold_selection_metadata,
+        validation_distance_metrics_by_threshold=validation_distance_metrics_by_threshold,
+        distance_selection_metadata=distance_selection_metadata,
+        known_intent_centroids=known_intent_centroids,
+        known_intent_centroid_label_ids=known_intent_centroid_label_ids,
+        known_intent_centroid_label_names=known_intent_centroid_label_names,
     )
 
 
@@ -98,6 +197,51 @@ def predict_probabilities(
     return _softmax(predictions.predictions)
 
 
+def predict_embeddings(
+    model,
+    tokenizer,
+    texts: list[str],
+    transformer_config: TransformerConfig,
+) -> np.ndarray:
+    """Extract a shared pooled hidden-state representation for distance scoring."""
+
+    try:
+        import torch
+        import torch.nn.functional as torch_functional
+    except ImportError as error:
+        raise ImportError(
+            "torch is required for transformer embedding extraction. "
+            "Install it with `pip install torch` or `pip install -e \".[dev]\"`."
+        ) from error
+
+    device = next(model.parameters()).device
+    model.eval()
+    embeddings: list[np.ndarray] = []
+
+    for start_index in range(0, len(texts), transformer_config.eval_batch_size):
+        batch_texts = texts[start_index : start_index + transformer_config.eval_batch_size]
+        encoded = tokenizer(
+            batch_texts,
+            truncation=True,
+            padding=True,
+            max_length=transformer_config.max_length,
+            return_tensors="pt",
+        )
+        encoded = {name: value.to(device) for name, value in encoded.items()}
+        with torch.inference_mode():
+            outputs = model.mpnet(**encoded, return_dict=True)
+            pooled = outputs.last_hidden_state[:, 0, :]
+            if transformer_config.oos_distance_metric == "cosine":
+                pooled = torch_functional.normalize(pooled, p=2, dim=1)
+        embeddings.append(pooled.detach().cpu().numpy())
+
+    if not embeddings:
+        hidden_size = getattr(model.config, "hidden_size", 0)
+        return np.empty((0, hidden_size), dtype=np.float32)
+
+    return np.vstack(embeddings)
+
+
 def evaluate_transformer_predictions(
     probabilities: np.ndarray,
     y_true: list[int],
@@ -105,6 +249,8 @@ def evaluate_transformer_predictions(
     oos_confidence_threshold: float | None,
     analysis_top_k_confusions: int,
     analysis_top_k_features_per_class: int,
+    nearest_known_intent_distances: np.ndarray | None = None,
+    oos_distance_threshold: float | None = None,
 ) -> EvaluationArtifacts:
     """Evaluate transformer probabilities using the shared reporting format."""
 
@@ -112,6 +258,8 @@ def evaluate_transformer_predictions(
         probabilities=probabilities,
         label_names=label_names,
         oos_confidence_threshold=oos_confidence_threshold,
+        nearest_known_intent_distances=nearest_known_intent_distances,
+        oos_distance_threshold=oos_distance_threshold,
     )
     top_k_predictions = top_k_from_probabilities(probabilities=probabilities, k=5)
     return evaluate_predictions(
@@ -130,17 +278,31 @@ def apply_probability_threshold(
     probabilities: np.ndarray,
     label_names: list[str],
     oos_confidence_threshold: float | None,
+    nearest_known_intent_distances: np.ndarray | None = None,
+    oos_distance_threshold: float | None = None,
 ) -> np.ndarray:
     """Apply an inference-time OOS threshold to class probabilities."""
 
     predicted_labels = np.argmax(probabilities, axis=1)
-    if oos_confidence_threshold is None or "oos" not in label_names:
+    if (
+        oos_confidence_threshold is None
+        and oos_distance_threshold is None
+    ) or "oos" not in label_names:
         return predicted_labels
 
     oos_label_id = label_names.index("oos")
     max_probabilities = probabilities.max(axis=1)
     predicted_labels = predicted_labels.copy()
-    predicted_labels[max_probabilities < oos_confidence_threshold] = oos_label_id
+    oos_mask = np.zeros_like(max_probabilities, dtype=bool)
+    if oos_confidence_threshold is not None:
+        oos_mask |= max_probabilities < oos_confidence_threshold
+    if oos_distance_threshold is not None:
+        if nearest_known_intent_distances is None:
+            raise ValueError(
+                "nearest_known_intent_distances are required when using oos_distance_threshold."
+            )
+        oos_mask |= nearest_known_intent_distances > oos_distance_threshold
+    predicted_labels[oos_mask] = oos_label_id
     return predicted_labels
 
 
@@ -149,6 +311,68 @@ def top_k_from_probabilities(probabilities: np.ndarray, k: int) -> np.ndarray:
 
     top_k = min(k, probabilities.shape[1])
     return np.argsort(probabilities, axis=1)[:, -top_k:][:, ::-1]
+
+
+def build_known_intent_centroids(
+    embeddings: np.ndarray,
+    labels: list[int],
+    label_names: list[str],
+    distance_metric: str,
+) -> tuple[np.ndarray, list[int]]:
+    """Build one centroid per known intent, excluding the OOS label."""
+
+    if distance_metric != "cosine":
+        raise ValueError(f"Unsupported oos_distance_metric: {distance_metric}")
+
+    oos_label_id = label_names.index("oos") if "oos" in label_names else None
+    centroid_vectors: list[np.ndarray] = []
+    centroid_label_ids: list[int] = []
+
+    for label_id, label_name in enumerate(label_names):
+        if label_id == oos_label_id or label_name == "oos":
+            continue
+        label_mask = np.asarray(labels) == label_id
+        if not np.any(label_mask):
+            continue
+        centroid = embeddings[label_mask].mean(axis=0)
+        centroid = _normalize_embeddings(np.asarray([centroid], dtype=np.float32))[0]
+        centroid_vectors.append(centroid)
+        centroid_label_ids.append(label_id)
+
+    if not centroid_vectors:
+        raise ValueError("No known-intent centroids could be built from the training split.")
+
+    return np.vstack(centroid_vectors), centroid_label_ids
+
+
+def compute_nearest_known_intent_distances(
+    embeddings: np.ndarray,
+    known_intent_centroids: np.ndarray,
+    distance_metric: str,
+) -> np.ndarray:
+    """Compute nearest known-intent centroid distance for each embedding."""
+
+    if distance_metric != "cosine":
+        raise ValueError(f"Unsupported oos_distance_metric: {distance_metric}")
+
+    similarities = embeddings @ known_intent_centroids.T
+    nearest_similarities = np.max(similarities, axis=1)
+    return 1.0 - nearest_similarities
+
+
+def build_distance_threshold_candidates(
+    distances: np.ndarray,
+    max_candidates: int = 200,
+) -> list[float]:
+    """Build deterministic distance-threshold candidates from validation distances."""
+
+    unique_distances = np.unique(np.asarray(distances, dtype=np.float64))
+    if unique_distances.size <= max_candidates:
+        return unique_distances.tolist()
+
+    quantiles = np.linspace(0.0, 1.0, num=max_candidates)
+    sampled = np.quantile(unique_distances, quantiles)
+    return np.unique(sampled).tolist()
 
 
 def evaluate_oos_threshold_candidates(
@@ -215,6 +439,84 @@ def evaluate_oos_threshold_candidates(
     }
 
 
+def evaluate_distance_threshold_candidates(
+    probabilities: np.ndarray,
+    nearest_known_intent_distances: np.ndarray,
+    y_true: list[int],
+    label_names: list[str],
+    fixed_oos_confidence_threshold: float,
+    distance_threshold_candidates: list[float],
+    analysis_top_k_confusions: int,
+    analysis_top_k_features_per_class: int,
+    selection_metric: str,
+    selection_strategy: str = "oos_aware_constrained",
+    max_in_scope_false_oos_rate: float = 0.03,
+    macro_f1_tolerance_ladder: list[float] | None = None,
+    fallback_strategy: str = "best_macro_f1",
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Evaluate centroid-distance thresholds with a fixed probability threshold."""
+
+    rows: list[dict[str, Any]] = []
+    for distance_threshold in distance_threshold_candidates:
+        evaluation = evaluate_transformer_predictions(
+            probabilities=probabilities,
+            y_true=y_true,
+            label_names=label_names,
+            oos_confidence_threshold=fixed_oos_confidence_threshold,
+            nearest_known_intent_distances=nearest_known_intent_distances,
+            oos_distance_threshold=distance_threshold,
+            analysis_top_k_confusions=analysis_top_k_confusions,
+            analysis_top_k_features_per_class=analysis_top_k_features_per_class,
+        )
+        rows.append(
+            {
+                "threshold": distance_threshold,
+                "distance_threshold": distance_threshold,
+                "fixed_oos_confidence_threshold": fixed_oos_confidence_threshold,
+                "accuracy": evaluation.accuracy,
+                "macro_f1": evaluation.macro_f1,
+                "top_5_accuracy": evaluation.top_5_accuracy,
+                "oos_f1": evaluation.oos_metrics.get("f1", 0.0),
+                "in_scope_false_oos_rate": evaluation.oos_metrics.get(
+                    "in_scope_false_oos_rate", 0.0
+                ),
+                "oos_metrics": evaluation.oos_metrics,
+            }
+        )
+
+    if selection_strategy == "oos_aware_constrained":
+        ranked_rows, metadata = _select_oos_aware_threshold_candidates(
+            rows=rows,
+            selection_metric=selection_metric,
+            max_in_scope_false_oos_rate=max_in_scope_false_oos_rate,
+            macro_f1_tolerance_ladder=macro_f1_tolerance_ladder or [0.01, 0.02, 0.03, 0.04, 0.05],
+            fallback_strategy=fallback_strategy,
+        )
+    else:
+        ranked_rows = sorted(
+            rows,
+            key=lambda row: _threshold_sort_key(row=row, selection_metric=selection_metric),
+            reverse=True,
+        )
+        selected_threshold = ranked_rows[0]["distance_threshold"] if ranked_rows else None
+        for index, row in enumerate(ranked_rows):
+            row["selection_eligible"] = index == 0
+            row["eligibility_reason"] = (
+                "selected_by_metric" if index == 0 else "ranked_below_selected_threshold"
+            )
+        metadata = {
+            "strategy": "metric",
+            "selection_metric": selection_metric,
+            "selected_threshold": selected_threshold,
+            "fallback_used": False,
+        }
+
+    metadata["selected_distance_threshold"] = metadata.pop("selected_threshold", None)
+    metadata["fixed_oos_confidence_threshold"] = fixed_oos_confidence_threshold
+    metadata["distance_threshold_candidates"] = distance_threshold_candidates
+    return ranked_rows, metadata
+
+
 def save_transformer_artifacts(
     transformer_artifacts: TransformerTrainingArtifacts,
     dataset: DatasetBundle,
@@ -227,6 +529,13 @@ def save_transformer_artifacts(
     model_dir.mkdir(parents=True, exist_ok=True)
     transformer_artifacts.model.save_pretrained(model_dir)
     transformer_artifacts.tokenizer.save_pretrained(model_dir)
+    if transformer_artifacts.known_intent_centroids is not None:
+        np.savez(
+            config.artifacts_dir / "known_intent_centroids.npz",
+            centroids=transformer_artifacts.known_intent_centroids,
+            label_ids=np.asarray(transformer_artifacts.known_intent_centroid_label_ids, dtype=np.int64),
+            label_names=np.asarray(transformer_artifacts.known_intent_centroid_label_names, dtype=str),
+        )
     _write_json(config.artifacts_dir / "label_mapping.json", {str(i): label for i, label in enumerate(label_names)})
     _write_json(
         config.artifacts_dir / "model_metadata.json",
@@ -241,6 +550,7 @@ def save_transformer_artifacts(
             "test_split": config.test_split,
             "include_oos": config.include_oos,
             "oos_confidence_threshold": transformer_artifacts.selected_oos_threshold,
+            "oos_distance_threshold": transformer_artifacts.selected_distance_threshold,
             "text_column": config.text_column,
             "label_column": config.label_column,
             "random_seed": config.random_seed,
@@ -262,6 +572,16 @@ def save_transformer_artifacts(
             "threshold_macro_f1_tolerance_ladder": config.transformer.threshold_macro_f1_tolerance_ladder,
             "threshold_fallback_strategy": config.transformer.threshold_fallback_strategy,
             "threshold_selection_metadata": transformer_artifacts.threshold_selection_metadata,
+            "oos_distance_enabled": config.transformer.oos_distance_enabled,
+            "oos_distance_metric": config.transformer.oos_distance_metric,
+            "oos_distance_candidate_source": config.transformer.oos_distance_candidate_source,
+            "oos_distance_selection_strategy": config.transformer.oos_distance_selection_strategy,
+            "oos_fixed_probability_source": config.transformer.oos_fixed_probability_source,
+            "distance_selection_metadata": transformer_artifacts.distance_selection_metadata,
+            "pooled_representation": "cls_last_hidden_state",
+            "distance_embedding_normalized": config.transformer.oos_distance_metric == "cosine",
+            "known_intent_centroid_label_ids": transformer_artifacts.known_intent_centroid_label_ids,
+            "known_intent_centroid_label_names": transformer_artifacts.known_intent_centroid_label_names,
             "num_labels": len(label_names),
         },
     )
@@ -269,8 +589,11 @@ def save_transformer_artifacts(
         config.artifacts_dir / "threshold_config.json",
         {
             "selected_oos_threshold": transformer_artifacts.selected_oos_threshold,
+            "selected_distance_threshold": transformer_artifacts.selected_distance_threshold,
             "validation_metrics_by_threshold": transformer_artifacts.validation_metrics_by_threshold,
             "selection_metadata": transformer_artifacts.threshold_selection_metadata,
+            "validation_metrics_by_distance_threshold": transformer_artifacts.validation_distance_metrics_by_threshold,
+            "distance_selection_metadata": transformer_artifacts.distance_selection_metadata,
         },
     )
 
@@ -415,6 +738,12 @@ def _softmax(logits: np.ndarray) -> np.ndarray:
     shifted = logits - np.max(logits, axis=1, keepdims=True)
     exp = np.exp(shifted)
     return exp / np.sum(exp, axis=1, keepdims=True)
+
+
+def _normalize_embeddings(embeddings: np.ndarray) -> np.ndarray:
+    norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+    norms = np.clip(norms, a_min=1e-12, a_max=None)
+    return embeddings / norms
 
 
 def _select_oos_aware_threshold_candidates(
