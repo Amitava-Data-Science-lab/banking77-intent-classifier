@@ -1,0 +1,60 @@
+{
+  "model_family": "transformer_sequence_classifier",
+  "dataset_type": "clinc150",
+  "dataset_name": "clinc150",
+  "dataset_task": "binary_oos",
+  "dataset_source": "../data/clinc150/data_full.json",
+  "train_split": "train",
+  "validation_split": "val",
+  "test_split": "test",
+  "include_oos": true,
+  "artifacts_dir": "../artifacts/clinc150/binary_oos_transformer_sequence_classifier_mpnet",
+  "reports_dir": "../reports/clinc150/binary_oos_transformer_sequence_classifier_mpnet",
+  "text_column": "text",
+  "label_column": "label",
+  "random_seed": 42,
+  "tfidf": {
+    "lowercase": true,
+    "strip_accents": "unicode",
+    "normalization": "none",
+    "ngram_range": [1, 2],
+    "min_df": 2,
+    "max_df": 0.98,
+    "sublinear_tf": true,
+    "max_features": 50000
+  },
+  "transformer": {
+    "model_name": "sentence-transformers/all-mpnet-base-v2",
+    "max_length": 128,
+    "learning_rate": 1e-5,
+    "num_train_epochs": 5.0,
+    "train_batch_size": 16,
+    "eval_batch_size": 32,
+    "weight_decay": 0.01,
+    "warmup_steps": 236,
+    "save_strategy": "epoch",
+    "evaluation_strategy": "epoch",
+    "load_best_model_at_end": false,
+    "metric_for_best_model": "macro_f1",
+    "greater_is_better": true,
+    "fp16": false,
+    "bf16": false,
+    "threshold_candidates": [0.001, 0.005, 0.01, 0.02, 0.05],
+    "threshold_selection_metric": "macro_f1",
+    "threshold_selection_strategy": "oos_aware_constrained",
+    "threshold_max_in_scope_false_oos_rate": 0.03,
+    "threshold_macro_f1_tolerance_ladder": [0.01, 0.02, 0.03, 0.04, 0.05],
+    "threshold_fallback_strategy": "best_macro_f1"
+  },
+  "classifier": {
+    "c": 1.0,
+    "class_weight": "balanced",
+    "max_iter": 5000,
+    "dual": true,
+    "random_state": 42
+  },
+  "analysis": {
+    "top_k_confusions": 25,
+    "top_k_features_per_class": 20
+  }
+}

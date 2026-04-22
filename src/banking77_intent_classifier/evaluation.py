@@ -169,6 +169,11 @@ def _top_features_by_class(
     if coefficients is None:
         return pd.DataFrame(columns=["label", "rank", "feature", "weight"])
 
+    # sklearn linear binary classifiers often expose a single coefficient row
+    # for the positive class. Mirror it so both labels get a feature view.
+    if coefficients.shape[0] == 1 and len(label_names) == 2:
+        coefficients = np.vstack([-coefficients[0], coefficients[0]])
+
     rows: list[dict] = []
     for class_index, label_name in enumerate(label_names):
         class_weights = coefficients[class_index]

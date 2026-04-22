@@ -167,6 +167,16 @@ def test_load_config_reads_clinc150_binary_oos_bge_file() -> None:
     assert config.reports_dir.name == "binary_oos_sentence_transformer_linear_bge_small"
 
 
+def test_load_config_reads_clinc150_binary_oos_transformer_mpnet_file() -> None:
+    config = load_config(Path("configs/clinc150_binary_oos_transformer_sequence_classifier_mpnet.json"))
+
+    assert config.model_family == "transformer_sequence_classifier"
+    assert config.dataset_task == "binary_oos"
+    assert config.transformer.model_name == "sentence-transformers/all-mpnet-base-v2"
+    assert config.transformer.threshold_selection_strategy == "oos_aware_constrained"
+    assert config.artifacts_dir.name == "binary_oos_transformer_sequence_classifier_mpnet"
+
+
 def test_load_config_reads_sentence_threshold_and_margin_file() -> None:
     config = load_config(
         Path("configs/clinc150_sentence_transformer_linear_bge_small_oos_threshold_03_margin_01.json")
