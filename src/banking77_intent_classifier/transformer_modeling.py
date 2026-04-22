@@ -217,6 +217,7 @@ def evaluate_oos_threshold_candidates(
 
 def save_transformer_artifacts(
     transformer_artifacts: TransformerTrainingArtifacts,
+    dataset: DatasetBundle,
     config: ExperimentConfig,
     label_names: list[str],
 ) -> None:

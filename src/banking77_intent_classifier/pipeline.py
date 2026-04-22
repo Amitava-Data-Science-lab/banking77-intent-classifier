@@ -130,6 +130,7 @@ def run_training_pipeline(
         }
         save_transformer_artifacts(
             transformer_artifacts=transformer_artifacts,
+            dataset=dataset,
             config=config,
             label_names=dataset.label_names,
         )
