@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 
@@ -65,6 +65,29 @@ class AnalysisConfig:
 
 
 @dataclass(slots=True)
+class TransformerConfig:
+    """Configuration for true transformer fine-tuning experiments."""
+
+    model_name: str = "sentence-transformers/all-mpnet-base-v2"
+    max_length: int = 128
+    learning_rate: float = 2e-5
+    num_train_epochs: float = 3.0
+    train_batch_size: int = 16
+    eval_batch_size: int = 32
+    weight_decay: float = 0.01
+    warmup_ratio: float = 0.1
+    save_strategy: str = "epoch"
+    evaluation_strategy: str = "epoch"
+    load_best_model_at_end: bool = True
+    metric_for_best_model: str = "macro_f1"
+    greater_is_better: bool = True
+    fp16: bool = False
+    bf16: bool = False
+    threshold_candidates: list[float] = field(default_factory=list)
+    threshold_selection_metric: str = "macro_f1"
+
+
+@dataclass(slots=True)
 class ExperimentConfig:
     """Configuration for a full training run."""
 
@@ -85,6 +108,7 @@ class ExperimentConfig:
     random_seed: int
     tfidf: TfidfConfig
     encoder: EncoderConfig
+    transformer: TransformerConfig
     reranker: RerankerConfig
     classifier: ClassifierConfig
     analysis: AnalysisConfig
@@ -183,6 +207,25 @@ def _parse_experiment_config(raw: dict, base_dir: Path) -> ExperimentConfig:
             batch_size=raw.get("encoder", {}).get("batch_size", 32),
             normalize_embeddings=raw.get("encoder", {}).get("normalize_embeddings", True),
             device=raw.get("encoder", {}).get("device"),
+        ),
+        transformer=TransformerConfig(
+            model_name=raw.get("transformer", {}).get("model_name", "sentence-transformers/all-mpnet-base-v2"),
+            max_length=raw.get("transformer", {}).get("max_length", 128),
+            learning_rate=raw.get("transformer", {}).get("learning_rate", 2e-5),
+            num_train_epochs=raw.get("transformer", {}).get("num_train_epochs", 3.0),
+            train_batch_size=raw.get("transformer", {}).get("train_batch_size", 16),
+            eval_batch_size=raw.get("transformer", {}).get("eval_batch_size", 32),
+            weight_decay=raw.get("transformer", {}).get("weight_decay", 0.01),
+            warmup_ratio=raw.get("transformer", {}).get("warmup_ratio", 0.1),
+            save_strategy=raw.get("transformer", {}).get("save_strategy", "epoch"),
+            evaluation_strategy=raw.get("transformer", {}).get("evaluation_strategy", "epoch"),
+            load_best_model_at_end=raw.get("transformer", {}).get("load_best_model_at_end", True),
+            metric_for_best_model=raw.get("transformer", {}).get("metric_for_best_model", "macro_f1"),
+            greater_is_better=raw.get("transformer", {}).get("greater_is_better", True),
+            fp16=raw.get("transformer", {}).get("fp16", False),
+            bf16=raw.get("transformer", {}).get("bf16", False),
+            threshold_candidates=raw.get("transformer", {}).get("threshold_candidates", []),
+            threshold_selection_metric=raw.get("transformer", {}).get("threshold_selection_metric", "macro_f1"),
         ),
         reranker=RerankerConfig(
             model_name=raw.get("reranker", {}).get("model_name", "cross-encoder/ms-marco-MiniLM-L-6-v2"),

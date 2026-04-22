@@ -26,6 +26,12 @@ from banking77_intent_classifier.reranking import (
     build_label_text_mapping,
     rerank_top_k_predictions,
 )
+from banking77_intent_classifier.transformer_modeling import (
+    evaluate_transformer_predictions,
+    predict_probabilities,
+    save_transformer_artifacts,
+    train_transformer_classifier,
+)
 
 
 LOGGER = logging.getLogger(__name__)
@@ -81,6 +87,61 @@ def run_training_pipeline(
         len(dataset.test_texts),
         len(dataset.label_names),
     )
+
+    if config.model_family == "transformer_sequence_classifier":
+        transformer_artifacts = train_transformer_classifier(dataset=dataset, config=config)
+        # The threshold remains an evaluation-time rule even for fine-tuned models.
+        config.oos_confidence_threshold = transformer_artifacts.selected_oos_threshold
+        test_probabilities = predict_probabilities(
+            trainer=transformer_artifacts.trainer,
+            texts=dataset.test_texts,
+            labels=dataset.test_labels,
+            tokenizer=transformer_artifacts.tokenizer,
+            transformer_config=config.transformer,
+        )
+        evaluation = evaluate_transformer_predictions(
+            probabilities=test_probabilities,
+            y_true=dataset.test_labels,
+            label_names=dataset.label_names,
+            oos_confidence_threshold=config.oos_confidence_threshold,
+            analysis_top_k_confusions=config.analysis.top_k_confusions,
+            analysis_top_k_features_per_class=config.analysis.top_k_features_per_class,
+        )
+        run_summary = {
+            "accuracy": evaluation.accuracy,
+            "macro_f1": evaluation.macro_f1,
+            "top_5_accuracy": evaluation.top_5_accuracy,
+            "oos_metrics": evaluation.oos_metrics,
+            "model_family": config.model_family,
+            "dataset_type": config.dataset_type,
+            "oos_confidence_threshold": config.oos_confidence_threshold,
+            "oos_margin_threshold": None,
+            "encoder_model_name": None,
+            "transformer_model_name": config.transformer.model_name,
+            "reranker_model_name": None,
+            "artifacts_dir": str(config.artifacts_dir),
+            "reports_dir": str(config.reports_dir),
+            "top_confusions_rows": len(evaluation.top_confusions_df),
+            "train_samples": len(dataset.train_texts),
+            "validation_samples": len(dataset.validation_texts),
+            "test_samples": len(dataset.test_texts),
+            "label_count": len(dataset.label_names),
+            "validation_threshold_candidates": transformer_artifacts.validation_metrics_by_threshold,
+        }
+        save_transformer_artifacts(
+            transformer_artifacts=transformer_artifacts,
+            config=config,
+            label_names=dataset.label_names,
+        )
+        save_evaluation_reports(evaluation=evaluation, config=config, run_summary=run_summary)
+        save_confusion_matrix_figure(
+            confusion_matrix_df=evaluation.confusion_matrix_df,
+            output_path=config.reports_dir / "confusion_matrix.png",
+            title="CLINC150 Transformer Confusion Matrix",
+        )
+        LOGGER.info("Saved transformer artifacts to %s", config.artifacts_dir)
+        LOGGER.info("Saved transformer reports to %s", config.reports_dir)
+        return run_summary
 
     pipeline = build_pipeline(
         model_family=config.model_family,

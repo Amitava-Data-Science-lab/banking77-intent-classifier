@@ -130,6 +130,16 @@ def test_load_config_reads_clinc150_sentence_mpnet_file() -> None:
     assert config.reports_dir.name == "sentence_transformer_linear_mpnet_base_v2"
 
 
+def test_load_config_reads_clinc150_transformer_mpnet_file() -> None:
+    config = load_config(Path("configs/clinc150_transformer_sequence_classifier_mpnet.json"))
+
+    assert config.model_family == "transformer_sequence_classifier"
+    assert config.dataset_type == "clinc150"
+    assert config.transformer.model_name == "sentence-transformers/all-mpnet-base-v2"
+    assert config.transformer.threshold_candidates == [0.3, 0.4, 0.5, 0.6]
+    assert config.transformer.threshold_selection_metric == "macro_f1"
+
+
 def test_load_config_reads_sentence_threshold_and_margin_file() -> None:
     config = load_config(
         Path("configs/clinc150_sentence_transformer_linear_bge_small_oos_threshold_03_margin_01.json")

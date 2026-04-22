@@ -23,6 +23,8 @@ dependencies = [
     "sentence-transformers>=3.0.0",
     "spacy>=3.8.0",
     "spacy-lookups-data>=1.0.5",
+    "transformers>=4.46.0",
+    "accelerate>=0.34.0",
 ]
 
 [project.optional-dependencies]
