@@ -176,6 +176,16 @@ def test_load_config_reads_clinc150_transformer_mpnet_energy_file() -> None:
     assert config.artifacts_dir.name == "transformer_sequence_classifier_mpnet_energy"
 
 
+def test_load_config_reads_clinc150_transformer_mpnet_temperature_file() -> None:
+    config = load_config(Path("configs/clinc150_transformer_sequence_classifier_mpnet_temperature_scaled.json"))
+
+    assert config.model_family == "transformer_sequence_classifier"
+    assert config.dataset_task == "full_intent"
+    assert config.transformer.temperature_scaling_enabled is True
+    assert config.transformer.temperature_scaling_grid == [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 5.0]
+    assert config.artifacts_dir.name == "transformer_sequence_classifier_mpnet_temperature_scaled"
+
+
 def test_load_config_reads_clinc150_binary_oos_tfidf_file() -> None:
     config = load_config(Path("configs/clinc150_binary_oos_tfidf_svc_lemmatized.json"))
 

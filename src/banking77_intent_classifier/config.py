@@ -102,6 +102,10 @@ class TransformerConfig:
     oos_energy_candidate_source: str = "validation_energies"
     oos_energy_selection_strategy: str = "oos_aware_constrained"
     oos_energy_fixed_probability_source: str = "selected_validation_threshold"
+    temperature_scaling_enabled: bool = False
+    temperature_scaling_grid: list[float] = field(
+        default_factory=lambda: [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 5.0]
+    )
 
 
 @dataclass(slots=True)
@@ -260,6 +264,8 @@ def _parse_experiment_config(raw: dict, base_dir: Path) -> ExperimentConfig:
             oos_energy_candidate_source=raw.get("transformer", {}).get("oos_energy_candidate_source", "validation_energies"),
             oos_energy_selection_strategy=raw.get("transformer", {}).get("oos_energy_selection_strategy", "oos_aware_constrained"),
             oos_energy_fixed_probability_source=raw.get("transformer", {}).get("oos_energy_fixed_probability_source", "selected_validation_threshold"),
+            temperature_scaling_enabled=raw.get("transformer", {}).get("temperature_scaling_enabled", False),
+            temperature_scaling_grid=raw.get("transformer", {}).get("temperature_scaling_grid", [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 5.0]),
         ),
         reranker=RerankerConfig(
             model_name=raw.get("reranker", {}).get("model_name", "cross-encoder/ms-marco-MiniLM-L-6-v2"),

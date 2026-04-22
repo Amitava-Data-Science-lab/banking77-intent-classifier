@@ -28,6 +28,7 @@ class TransformerTrainingArtifacts:
     selected_oos_threshold: float | None
     selected_distance_threshold: float | None
     selected_energy_threshold: float | None
+    temperature: float
     validation_metrics_by_threshold: list[dict[str, Any]]
     threshold_selection_metadata: dict[str, Any] = field(default_factory=dict)
     validation_distance_metrics_by_threshold: list[dict[str, Any]] = field(default_factory=list)
@@ -51,6 +52,7 @@ def train_transformer_classifier(
     selected_oos_threshold = config.oos_confidence_threshold
     selected_distance_threshold: float | None = None
     selected_energy_threshold: float | None = None
+    calibration_temperature = 1.0
     validation_metrics_by_threshold: list[dict[str, Any]] = []
     validation_distance_metrics_by_threshold: list[dict[str, Any]] = []
     validation_energy_metrics_by_threshold: list[dict[str, Any]] = []
@@ -69,15 +71,47 @@ def train_transformer_classifier(
     known_intent_centroids: np.ndarray | None = None
     known_intent_centroid_label_ids: list[int] = []
     known_intent_centroid_label_names: list[str] = []
+    validation_logits: np.ndarray | None = None
 
-    if selected_oos_threshold is None and config.transformer.threshold_candidates:
-        validation_probabilities = predict_probabilities(
+    if (
+        selected_oos_threshold is None
+        and (
+            config.transformer.threshold_candidates
+            or config.transformer.oos_energy_enabled
+            or config.transformer.temperature_scaling_enabled
+        )
+    ):
+        validation_logits = predict_logits(
             trainer=trainer,
             texts=dataset.validation_texts,
             labels=dataset.validation_labels,
             tokenizer=tokenizer,
             transformer_config=config.transformer,
         )
+        if config.transformer.temperature_scaling_enabled:
+            calibration_temperature, best_nll = fit_temperature(
+                logits=validation_logits,
+                labels=np.asarray(dataset.validation_labels, dtype=np.int64),
+                temperature_grid=config.transformer.temperature_scaling_grid,
+            )
+            threshold_selection_metadata["temperature_scaling"] = {
+                "enabled": True,
+                "temperature": calibration_temperature,
+                "objective": "validation_nll",
+                "grid": config.transformer.temperature_scaling_grid,
+                "best_nll": best_nll,
+            }
+
+    if selected_oos_threshold is None and config.transformer.threshold_candidates:
+        if validation_logits is None:
+            validation_logits = predict_logits(
+                trainer=trainer,
+                texts=dataset.validation_texts,
+                labels=dataset.validation_labels,
+                tokenizer=tokenizer,
+                transformer_config=config.transformer,
+            )
+        validation_probabilities = _softmax(validation_logits, temperature=calibration_temperature)
         validation_metrics_by_threshold, threshold_selection_metadata = evaluate_oos_threshold_candidates(
             probabilities=validation_probabilities,
             y_true=dataset.validation_labels,
@@ -91,6 +125,13 @@ def train_transformer_classifier(
             macro_f1_tolerance_ladder=config.transformer.threshold_macro_f1_tolerance_ladder,
             fallback_strategy=config.transformer.threshold_fallback_strategy,
         )
+        if config.transformer.temperature_scaling_enabled:
+            threshold_selection_metadata["temperature_scaling"] = {
+                "enabled": True,
+                "temperature": calibration_temperature,
+                "objective": "validation_nll",
+                "grid": config.transformer.temperature_scaling_grid,
+            }
         selected_oos_threshold = threshold_selection_metadata["selected_threshold"]
 
     if config.transformer.oos_distance_enabled:
@@ -188,14 +229,15 @@ def train_transformer_classifier(
                 f"{config.transformer.oos_energy_candidate_source}"
             )
 
-        validation_logits = predict_logits(
-            trainer=trainer,
-            texts=dataset.validation_texts,
-            labels=dataset.validation_labels,
-            tokenizer=tokenizer,
-            transformer_config=config.transformer,
-        )
-        validation_probabilities = _softmax(validation_logits)
+        if validation_logits is None:
+            validation_logits = predict_logits(
+                trainer=trainer,
+                texts=dataset.validation_texts,
+                labels=dataset.validation_labels,
+                tokenizer=tokenizer,
+                transformer_config=config.transformer,
+            )
+        validation_probabilities = _softmax(validation_logits, temperature=calibration_temperature)
         validation_energies = compute_energy_scores(
             logits=validation_logits,
             temperature=config.transformer.oos_energy_temperature,
@@ -230,6 +272,7 @@ def train_transformer_classifier(
         selected_oos_threshold=selected_oos_threshold,
         selected_distance_threshold=selected_distance_threshold,
         selected_energy_threshold=selected_energy_threshold,
+        temperature=calibration_temperature,
         validation_metrics_by_threshold=validation_metrics_by_threshold,
         threshold_selection_metadata=threshold_selection_metadata,
         validation_distance_metrics_by_threshold=validation_distance_metrics_by_threshold,
@@ -248,6 +291,7 @@ def predict_probabilities(
     labels: list[int],
     tokenizer,
     transformer_config: TransformerConfig,
+    temperature: float = 1.0,
 ) -> np.ndarray:
     """Predict class probabilities from a fine-tuned transformer."""
 
@@ -258,7 +302,7 @@ def predict_probabilities(
         max_length=transformer_config.max_length,
     )
     predictions = trainer.predict(prediction_dataset)
-    return _softmax(predictions.predictions)
+    return _softmax(predictions.predictions, temperature=temperature)
 
 
 def predict_logits(
@@ -479,6 +523,37 @@ def compute_energy_scores(
     max_logits = np.max(scaled_logits, axis=1, keepdims=True)
     logsumexp = np.log(np.sum(np.exp(scaled_logits - max_logits), axis=1)) + max_logits.squeeze(axis=1)
     return -temperature * logsumexp
+
+
+def fit_temperature(
+    logits: np.ndarray,
+    labels: np.ndarray,
+    temperature_grid: list[float],
+) -> tuple[float, float]:
+    """Choose a temperature that minimizes validation negative log-likelihood."""
+
+    if logits.size == 0:
+        return 1.0, 0.0
+
+    best_temperature = 1.0
+    best_nll = float("inf")
+    for temperature in temperature_grid:
+        probabilities = _softmax(logits, temperature=temperature)
+        nll = negative_log_likelihood(probabilities=probabilities, labels=labels)
+        if nll < best_nll:
+            best_nll = nll
+            best_temperature = temperature
+    return best_temperature, best_nll
+
+
+def negative_log_likelihood(
+    probabilities: np.ndarray,
+    labels: np.ndarray,
+) -> float:
+    """Compute mean negative log-likelihood for a probability matrix."""
+
+    clipped = np.clip(probabilities[np.arange(labels.shape[0]), labels], a_min=1e-12, a_max=1.0)
+    return float(-np.mean(np.log(clipped)))
 
 
 def build_energy_threshold_candidates(
@@ -751,6 +826,9 @@ def save_transformer_artifacts(
             "oos_confidence_threshold": transformer_artifacts.selected_oos_threshold,
             "oos_distance_threshold": transformer_artifacts.selected_distance_threshold,
             "oos_energy_threshold": transformer_artifacts.selected_energy_threshold,
+            "temperature_scaling_enabled": config.transformer.temperature_scaling_enabled,
+            "temperature_scaling_grid": config.transformer.temperature_scaling_grid,
+            "temperature": transformer_artifacts.temperature,
             "text_column": config.text_column,
             "label_column": config.label_column,
             "random_seed": config.random_seed,
@@ -797,6 +875,7 @@ def save_transformer_artifacts(
             "selected_oos_threshold": transformer_artifacts.selected_oos_threshold,
             "selected_distance_threshold": transformer_artifacts.selected_distance_threshold,
             "selected_energy_threshold": transformer_artifacts.selected_energy_threshold,
+            "temperature": transformer_artifacts.temperature,
             "validation_metrics_by_threshold": transformer_artifacts.validation_metrics_by_threshold,
             "selection_metadata": transformer_artifacts.threshold_selection_metadata,
             "validation_metrics_by_distance_threshold": transformer_artifacts.validation_distance_metrics_by_threshold,
@@ -943,8 +1022,9 @@ def _build_compute_metrics(label_names: list[str]):
     return compute_metrics
 
 
-def _softmax(logits: np.ndarray) -> np.ndarray:
-    shifted = logits - np.max(logits, axis=1, keepdims=True)
+def _softmax(logits: np.ndarray, temperature: float = 1.0) -> np.ndarray:
+    scaled_logits = logits / temperature
+    shifted = scaled_logits - np.max(scaled_logits, axis=1, keepdims=True)
     exp = np.exp(shifted)
     return exp / np.sum(exp, axis=1, keepdims=True)
 

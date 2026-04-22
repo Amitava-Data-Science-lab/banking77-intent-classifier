@@ -111,6 +111,7 @@ def run_training_pipeline(
             labels=dataset.test_labels,
             tokenizer=transformer_artifacts.tokenizer,
             transformer_config=config.transformer,
+            temperature=transformer_artifacts.temperature,
         )
         test_energy_scores = None
         if (
@@ -156,6 +157,7 @@ def run_training_pipeline(
             "oos_confidence_threshold": config.oos_confidence_threshold,
             "oos_distance_threshold": transformer_artifacts.selected_distance_threshold,
             "oos_energy_threshold": transformer_artifacts.selected_energy_threshold,
+            "temperature": transformer_artifacts.temperature,
             "oos_margin_threshold": None,
             "encoder_model_name": None,
             "transformer_model_name": config.transformer.model_name,

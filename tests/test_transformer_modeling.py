@@ -11,6 +11,9 @@ from banking77_intent_classifier.transformer_modeling import (
     evaluate_energy_threshold_candidates,
     evaluate_oos_threshold_candidates,
     evaluate_distance_threshold_candidates,
+    fit_temperature,
+    negative_log_likelihood,
+    _softmax,
     top_k_from_probabilities,
 )
 
@@ -228,6 +231,34 @@ def test_compute_energy_scores_matches_expected_ordering() -> None:
 
     assert energies.shape == (2,)
     assert energies[0] < energies[1]
+
+
+def test_temperature_scaling_softens_probabilities() -> None:
+    logits = np.array([[4.0, 0.0]], dtype=np.float32)
+
+    sharp = _softmax(logits, temperature=1.0)
+    soft = _softmax(logits, temperature=2.0)
+
+    assert sharp[0, 0] > soft[0, 0]
+
+
+def test_negative_log_likelihood_and_fit_temperature_select_best_grid_value() -> None:
+    logits = np.array(
+        [
+            [4.0, 0.0],
+            [3.0, 0.0],
+            [0.1, 0.0],
+        ],
+        dtype=np.float32,
+    )
+    labels = np.array([0, 0, 1], dtype=np.int64)
+
+    grid = [0.5, 1.0, 2.0, 5.0]
+    temperature, best_nll = fit_temperature(logits=logits, labels=labels, temperature_grid=grid)
+
+    nlls = {candidate: negative_log_likelihood(_softmax(logits, candidate), labels) for candidate in grid}
+    assert temperature == min(nlls, key=nlls.get)
+    assert best_nll == nlls[temperature]
 
 
 def test_build_energy_threshold_candidates_uses_validation_energies_deterministically() -> None:
