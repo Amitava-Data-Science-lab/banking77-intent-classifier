@@ -5,7 +5,7 @@ from __future__ import annotations
 import inspect
 import math
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +27,7 @@ class TransformerTrainingArtifacts:
     trainer: Any
     selected_oos_threshold: float | None
     validation_metrics_by_threshold: list[dict[str, Any]]
+    threshold_selection_metadata: dict[str, Any] = field(default_factory=dict)
 
 
 def train_transformer_classifier(
@@ -40,6 +41,10 @@ def train_transformer_classifier(
 
     selected_oos_threshold = config.oos_confidence_threshold
     validation_metrics_by_threshold: list[dict[str, Any]] = []
+    threshold_selection_metadata: dict[str, Any] = {
+        "strategy": "manual_override" if selected_oos_threshold is not None else None,
+        "selected_threshold": selected_oos_threshold,
+    }
 
     if selected_oos_threshold is None and config.transformer.threshold_candidates:
         validation_probabilities = predict_probabilities(
@@ -49,7 +54,7 @@ def train_transformer_classifier(
             tokenizer=tokenizer,
             transformer_config=config.transformer,
         )
-        validation_metrics_by_threshold = evaluate_oos_threshold_candidates(
+        validation_metrics_by_threshold, threshold_selection_metadata = evaluate_oos_threshold_candidates(
             probabilities=validation_probabilities,
             y_true=dataset.validation_labels,
             label_names=dataset.label_names,
@@ -57,8 +62,12 @@ def train_transformer_classifier(
             analysis_top_k_confusions=config.analysis.top_k_confusions,
             analysis_top_k_features_per_class=config.analysis.top_k_features_per_class,
             selection_metric=config.transformer.threshold_selection_metric,
+            selection_strategy=config.transformer.threshold_selection_strategy,
+            max_in_scope_false_oos_rate=config.transformer.threshold_max_in_scope_false_oos_rate,
+            macro_f1_tolerance_ladder=config.transformer.threshold_macro_f1_tolerance_ladder,
+            fallback_strategy=config.transformer.threshold_fallback_strategy,
         )
-        selected_oos_threshold = validation_metrics_by_threshold[0]["threshold"]
+        selected_oos_threshold = threshold_selection_metadata["selected_threshold"]
 
     return TransformerTrainingArtifacts(
         model=model,
@@ -66,6 +75,7 @@ def train_transformer_classifier(
         trainer=trainer,
         selected_oos_threshold=selected_oos_threshold,
         validation_metrics_by_threshold=validation_metrics_by_threshold,
+        threshold_selection_metadata=threshold_selection_metadata,
     )
 
 
@@ -149,7 +159,11 @@ def evaluate_oos_threshold_candidates(
     analysis_top_k_confusions: int,
     analysis_top_k_features_per_class: int,
     selection_metric: str,
-) -> list[dict[str, Any]]:
+    selection_strategy: str = "metric",
+    max_in_scope_false_oos_rate: float = 0.03,
+    macro_f1_tolerance_ladder: list[float] | None = None,
+    fallback_strategy: str = "best_macro_f1",
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Evaluate threshold candidates on a validation split and rank them."""
 
     rows: list[dict[str, Any]] = []
@@ -168,15 +182,37 @@ def evaluate_oos_threshold_candidates(
                 "accuracy": evaluation.accuracy,
                 "macro_f1": evaluation.macro_f1,
                 "top_5_accuracy": evaluation.top_5_accuracy,
+                "oos_f1": evaluation.oos_metrics.get("f1", 0.0),
+                "in_scope_false_oos_rate": evaluation.oos_metrics.get("in_scope_false_oos_rate", 0.0),
                 "oos_metrics": evaluation.oos_metrics,
             }
         )
 
-    return sorted(
+    if selection_strategy == "oos_aware_constrained":
+        return _select_oos_aware_threshold_candidates(
+            rows=rows,
+            selection_metric=selection_metric,
+            max_in_scope_false_oos_rate=max_in_scope_false_oos_rate,
+            macro_f1_tolerance_ladder=macro_f1_tolerance_ladder or [0.01, 0.02, 0.03, 0.04, 0.05],
+            fallback_strategy=fallback_strategy,
+        )
+
+    ranked_rows = sorted(
         rows,
         key=lambda row: _threshold_sort_key(row=row, selection_metric=selection_metric),
         reverse=True,
     )
+    selected_threshold = ranked_rows[0]["threshold"] if ranked_rows else None
+    for index, row in enumerate(ranked_rows):
+        row["selection_eligible"] = index == 0
+        row["eligibility_reason"] = "selected_by_metric" if index == 0 else "ranked_below_selected_threshold"
+
+    return ranked_rows, {
+        "strategy": "metric",
+        "selection_metric": selection_metric,
+        "selected_threshold": selected_threshold,
+        "fallback_used": False,
+    }
 
 
 def save_transformer_artifacts(
@@ -219,6 +255,11 @@ def save_transformer_artifacts(
             "metric_for_best_model": config.transformer.metric_for_best_model,
             "threshold_candidates": config.transformer.threshold_candidates,
             "threshold_selection_metric": config.transformer.threshold_selection_metric,
+            "threshold_selection_strategy": config.transformer.threshold_selection_strategy,
+            "threshold_max_in_scope_false_oos_rate": config.transformer.threshold_max_in_scope_false_oos_rate,
+            "threshold_macro_f1_tolerance_ladder": config.transformer.threshold_macro_f1_tolerance_ladder,
+            "threshold_fallback_strategy": config.transformer.threshold_fallback_strategy,
+            "threshold_selection_metadata": transformer_artifacts.threshold_selection_metadata,
             "num_labels": len(label_names),
         },
     )
@@ -227,6 +268,7 @@ def save_transformer_artifacts(
         {
             "selected_oos_threshold": transformer_artifacts.selected_oos_threshold,
             "validation_metrics_by_threshold": transformer_artifacts.validation_metrics_by_threshold,
+            "selection_metadata": transformer_artifacts.threshold_selection_metadata,
         },
     )
 
@@ -371,6 +413,81 @@ def _softmax(logits: np.ndarray) -> np.ndarray:
     shifted = logits - np.max(logits, axis=1, keepdims=True)
     exp = np.exp(shifted)
     return exp / np.sum(exp, axis=1, keepdims=True)
+
+
+def _select_oos_aware_threshold_candidates(
+    rows: list[dict[str, Any]],
+    selection_metric: str,
+    max_in_scope_false_oos_rate: float,
+    macro_f1_tolerance_ladder: list[float],
+    fallback_strategy: str,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    best_macro_f1 = max((row["macro_f1"] for row in rows), default=0.0)
+    selected_row: dict[str, Any] | None = None
+    successful_tolerance: float | None = None
+
+    for tolerance in macro_f1_tolerance_ladder:
+        eligible_rows = [
+            row
+            for row in rows
+            if row["in_scope_false_oos_rate"] <= max_in_scope_false_oos_rate
+            and row["macro_f1"] >= best_macro_f1 - tolerance
+        ]
+        if eligible_rows:
+            selected_row = max(eligible_rows, key=_oos_constrained_sort_key)
+            successful_tolerance = tolerance
+            break
+
+    fallback_used = False
+    if selected_row is None:
+        fallback_used = True
+        if fallback_strategy != "best_macro_f1":
+            raise ValueError(f"Unsupported threshold fallback strategy: {fallback_strategy}")
+        selected_row = max(rows, key=lambda row: _threshold_sort_key(row=row, selection_metric=selection_metric))
+
+    annotated_rows: list[dict[str, Any]] = []
+    comparison_tolerance = successful_tolerance if successful_tolerance is not None else max(macro_f1_tolerance_ladder, default=0.05)
+    for row in rows:
+        annotated_row = dict(row)
+        reasons: list[str] = []
+        if row["in_scope_false_oos_rate"] > max_in_scope_false_oos_rate:
+            reasons.append("in_scope_false_oos_rate_exceeds_limit")
+        if row["macro_f1"] < best_macro_f1 - comparison_tolerance:
+            reasons.append("macro_f1_below_tolerance")
+        if row["threshold"] == selected_row["threshold"]:
+            annotated_row["selection_eligible"] = not fallback_used or not reasons
+            annotated_row["eligibility_reason"] = "selected_by_oos_aware_constraints" if not fallback_used else "fallback_best_macro_f1"
+        else:
+            annotated_row["selection_eligible"] = len(reasons) == 0 and not fallback_used
+            annotated_row["eligibility_reason"] = "eligible_not_selected" if annotated_row["selection_eligible"] else ",".join(reasons) if reasons else "ranked_below_selected_threshold"
+        annotated_rows.append(annotated_row)
+
+    selected_threshold = selected_row["threshold"]
+    annotated_rows = sorted(
+        annotated_rows,
+        key=lambda row: (row["threshold"] != selected_threshold, -row["oos_f1"], -row["macro_f1"], row["in_scope_false_oos_rate"], row["threshold"]),
+    )
+
+    return annotated_rows, {
+        "strategy": "oos_aware_constrained",
+        "selection_metric": selection_metric,
+        "selected_threshold": selected_threshold,
+        "best_macro_f1": best_macro_f1,
+        "max_in_scope_false_oos_rate": max_in_scope_false_oos_rate,
+        "macro_f1_tolerance_ladder": macro_f1_tolerance_ladder,
+        "successful_tolerance": successful_tolerance,
+        "fallback_strategy": fallback_strategy,
+        "fallback_used": fallback_used,
+    }
+
+
+def _oos_constrained_sort_key(row: dict[str, Any]) -> tuple[float, float, float, float]:
+    return (
+        row["oos_f1"],
+        row["macro_f1"],
+        -row["in_scope_false_oos_rate"],
+        -row["threshold"],
+    )
 
 
 def _threshold_sort_key(row: dict[str, Any], selection_metric: str) -> tuple:

@@ -86,6 +86,12 @@ class TransformerConfig:
     bf16: bool = False
     threshold_candidates: list[float] = field(default_factory=list)
     threshold_selection_metric: str = "macro_f1"
+    threshold_selection_strategy: str = "metric"
+    threshold_max_in_scope_false_oos_rate: float = 0.03
+    threshold_macro_f1_tolerance_ladder: list[float] = field(
+        default_factory=lambda: [0.01, 0.02, 0.03, 0.04, 0.05]
+    )
+    threshold_fallback_strategy: str = "best_macro_f1"
 
 
 @dataclass(slots=True)
@@ -228,6 +234,10 @@ def _parse_experiment_config(raw: dict, base_dir: Path) -> ExperimentConfig:
             bf16=raw.get("transformer", {}).get("bf16", False),
             threshold_candidates=raw.get("transformer", {}).get("threshold_candidates", []),
             threshold_selection_metric=raw.get("transformer", {}).get("threshold_selection_metric", "macro_f1"),
+            threshold_selection_strategy=raw.get("transformer", {}).get("threshold_selection_strategy", "metric"),
+            threshold_max_in_scope_false_oos_rate=raw.get("transformer", {}).get("threshold_max_in_scope_false_oos_rate", 0.03),
+            threshold_macro_f1_tolerance_ladder=raw.get("transformer", {}).get("threshold_macro_f1_tolerance_ladder", [0.01, 0.02, 0.03, 0.04, 0.05]),
+            threshold_fallback_strategy=raw.get("transformer", {}).get("threshold_fallback_strategy", "best_macro_f1"),
         ),
         reranker=RerankerConfig(
             model_name=raw.get("reranker", {}).get("model_name", "cross-encoder/ms-marco-MiniLM-L-6-v2"),

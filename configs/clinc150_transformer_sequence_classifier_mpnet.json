@@ -39,7 +39,11 @@
     "fp16": false,
     "bf16": false,
     "threshold_candidates": [0.001, 0.005, 0.01, 0.02, 0.05],
-    "threshold_selection_metric": "macro_f1"
+    "threshold_selection_metric": "macro_f1",
+    "threshold_selection_strategy": "oos_aware_constrained",
+    "threshold_max_in_scope_false_oos_rate": 0.03,
+    "threshold_macro_f1_tolerance_ladder": [0.01, 0.02, 0.03, 0.04, 0.05],
+    "threshold_fallback_strategy": "best_macro_f1"
   },
   "classifier": {
     "c": 1.0,

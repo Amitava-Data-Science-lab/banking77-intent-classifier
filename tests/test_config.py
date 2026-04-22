@@ -142,6 +142,10 @@ def test_load_config_reads_clinc150_transformer_mpnet_file() -> None:
     assert config.transformer.warmup_steps == 236
     assert config.transformer.threshold_candidates == [0.001, 0.005, 0.01, 0.02, 0.05]
     assert config.transformer.threshold_selection_metric == "macro_f1"
+    assert config.transformer.threshold_selection_strategy == "oos_aware_constrained"
+    assert config.transformer.threshold_max_in_scope_false_oos_rate == 0.03
+    assert config.transformer.threshold_macro_f1_tolerance_ladder == [0.01, 0.02, 0.03, 0.04, 0.05]
+    assert config.transformer.threshold_fallback_strategy == "best_macro_f1"
 
 
 def test_load_config_reads_sentence_threshold_and_margin_file() -> None:
