@@ -274,7 +274,7 @@ def _build_trainer(dataset: DatasetBundle, config: ExperimentConfig):
         weight_decay=config.transformer.weight_decay,
         warmup_ratio=config.transformer.warmup_ratio,
         save_strategy=config.transformer.save_strategy,
-        evaluation_strategy=config.transformer.evaluation_strategy,
+        eval_strategy=config.transformer.evaluation_strategy,
         load_best_model_at_end=config.transformer.load_best_model_at_end,
         metric_for_best_model=config.transformer.metric_for_best_model,
         greater_is_better=config.transformer.greater_is_better,
