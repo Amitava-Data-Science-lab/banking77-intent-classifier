@@ -14,7 +14,7 @@ def test_predictor_wraps_pipeline_predictions() -> None:
 
     pipeline = build_pipeline(
         model_family="tfidf_svc",
-        tfidf_config=TfidfConfig(max_features=100),
+        tfidf_config=TfidfConfig(max_features=100, min_df=1),
         encoder_config=EncoderConfig(),
         classifier_config=ClassifierConfig(max_iter=1000),
     )

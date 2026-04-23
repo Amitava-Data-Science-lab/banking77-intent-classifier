@@ -6,11 +6,13 @@ import json
 from pathlib import Path
 
 import joblib
+import numpy as np
 import pandas as pd
 from scipy import sparse
 from sklearn.pipeline import Pipeline
 
 from banking77_intent_classifier.config import ExperimentConfig
+from banking77_intent_classifier.contrastive_modeling import ContrastiveTrainingArtifacts
 from banking77_intent_classifier.evaluation import EvaluationArtifacts
 from banking77_intent_classifier.modeling import WeightExport
 
@@ -77,6 +79,62 @@ def save_model_artifacts(
         )
     if weight_export.coefficients is not None:
         sparse.save_npz(config.artifacts_dir / "weights.npz", weight_export.coefficients)
+
+
+def save_contrastive_artifacts(
+    contrastive_artifacts: ContrastiveTrainingArtifacts,
+    config: ExperimentConfig,
+    label_names: list[str],
+) -> None:
+    """Persist contrastive encoder artifacts and retrieval metadata."""
+
+    encoder_dir = config.artifacts_dir / "encoder"
+    contrastive_artifacts.encoder.save(str(encoder_dir))
+    _write_json(config.artifacts_dir / "label_mapping.json", {str(i): label for i, label in enumerate(label_names)})
+    np.save(config.artifacts_dir / "exemplar_embeddings.npy", contrastive_artifacts.exemplar_embeddings)
+    np.save(config.artifacts_dir / "exemplar_label_ids.npy", contrastive_artifacts.exemplar_label_ids)
+    _write_json(
+        config.artifacts_dir / "threshold_config.json",
+        {
+            "selected_oos_threshold": contrastive_artifacts.selected_oos_threshold,
+            "validation_metrics_by_threshold": contrastive_artifacts.validation_metrics_by_threshold,
+            "selection_metadata": contrastive_artifacts.threshold_selection_metadata,
+        },
+    )
+    _write_json(
+        config.artifacts_dir / "training_data_config.json",
+        contrastive_artifacts.training_data_metadata,
+    )
+    _write_json(
+        config.artifacts_dir / "model_metadata.json",
+        {
+            "model_family": config.model_family,
+            "dataset_type": config.dataset_type,
+            "dataset_name": config.dataset_name,
+            "dataset_task": config.dataset_task,
+            "dataset_source": str(config.dataset_source) if config.dataset_source is not None else None,
+            "train_split": config.train_split,
+            "validation_split": config.validation_split,
+            "test_split": config.test_split,
+            "include_oos": config.include_oos,
+            "text_column": config.text_column,
+            "label_column": config.label_column,
+            "random_seed": config.random_seed,
+            "encoder_model_name": config.contrastive.model_name,
+            "num_labels": len(label_names),
+            "num_exemplars": int(contrastive_artifacts.exemplar_embeddings.shape[0]),
+            "embedding_dim": int(contrastive_artifacts.exemplar_embeddings.shape[1]),
+            "neighbor_count": config.contrastive.neighbor_count,
+            "distance_metric": config.contrastive.distance_metric,
+            "vote_strategy": config.contrastive.vote_strategy,
+            "oos_negative_policy": "negative_only",
+            "negative_mix": {
+                "hard_in_scope": config.contrastive.hard_negative_ratio,
+                "random_in_scope": config.contrastive.random_negative_ratio,
+                "oos": config.contrastive.oos_negative_ratio,
+            },
+        },
+    )
 
 
 def save_evaluation_reports(

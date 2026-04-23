@@ -1,10 +1,12 @@
 """Reusable package for dataset-driven intent classification experiments."""
 
 from banking77_intent_classifier.inference import (
+    ContrastivePredictor,
     IntentPrediction,
     Predictor,
     RerankingPredictor,
     TransformerPredictor,
+    load_contrastive_predictor,
     load_predictor,
     load_reranking_predictor,
     load_transformer_predictor,
@@ -16,8 +18,10 @@ __all__ = [
     "Predictor",
     "RerankingPredictor",
     "TransformerPredictor",
+    "ContrastivePredictor",
     "load_predictor",
     "load_reranking_predictor",
     "load_transformer_predictor",
+    "load_contrastive_predictor",
     "run_training_pipeline",
 ]

@@ -10,6 +10,8 @@ import joblib
 import numpy as np
 from sklearn.pipeline import Pipeline
 
+from banking77_intent_classifier.config import ContrastiveConfig
+from banking77_intent_classifier.contrastive_modeling import retrieve_contrastive_predictions
 from banking77_intent_classifier.modeling import predict_top_k_labels
 from banking77_intent_classifier.reranking import CrossEncoderReranker, rerank_top_k_predictions
 from banking77_intent_classifier.transformer_modeling import apply_probability_threshold
@@ -134,6 +136,44 @@ class TransformerPredictor:
         ]
 
 
+class ContrastivePredictor:
+    """Predictor for contrastive retrieval artifacts."""
+
+    def __init__(
+        self,
+        encoder,
+        label_mapping: dict[int, str],
+        exemplar_embeddings: np.ndarray,
+        exemplar_label_ids: np.ndarray,
+        contrastive_config: ContrastiveConfig,
+        oos_threshold: float | None = None,
+    ) -> None:
+        self._encoder = encoder
+        self._label_mapping = label_mapping
+        self._exemplar_embeddings = exemplar_embeddings
+        self._exemplar_label_ids = exemplar_label_ids
+        self._contrastive_config = contrastive_config
+        self._oos_threshold = oos_threshold
+
+    def predict_one(self, text: str) -> IntentPrediction:
+        return self.predict_many([text])[0]
+
+    def predict_many(self, texts: list[str]) -> list[IntentPrediction]:
+        retrieval = retrieve_contrastive_predictions(
+            encoder=self._encoder,
+            texts=texts,
+            exemplar_embeddings=self._exemplar_embeddings,
+            exemplar_label_ids=self._exemplar_label_ids,
+            label_names=[self._label_mapping[index] for index in sorted(self._label_mapping)],
+            contrastive_config=self._contrastive_config,
+            oos_threshold=self._oos_threshold,
+        )
+        return [
+            IntentPrediction(label_id=int(label_id), label=self._label_mapping[int(label_id)])
+            for label_id in retrieval.predictions
+        ]
+
+
 def load_predictor(model_path: str | Path, label_mapping_path: str | Path) -> Predictor:
     """Load a persisted model pipeline and label mapping."""
 
@@ -200,6 +240,43 @@ def load_transformer_predictor(
         label_mapping=label_mapping,
         oos_confidence_threshold=oos_confidence_threshold,
         max_length=max_length,
+    )
+
+
+def load_contrastive_predictor(
+    model_dir: str | Path,
+    label_mapping_path: str | Path,
+    exemplar_embeddings_path: str | Path,
+    exemplar_label_ids_path: str | Path,
+    threshold_config_path: str | Path,
+    contrastive_config: ContrastiveConfig,
+) -> ContrastivePredictor:
+    """Load a persisted contrastive predictor."""
+
+    try:
+        from sentence_transformers import SentenceTransformer
+    except ImportError as error:
+        raise ImportError(
+            "sentence-transformers is required to load a contrastive predictor. "
+            "Install it with `pip install sentence-transformers`."
+        ) from error
+
+    with Path(label_mapping_path).open("r", encoding="utf-8") as file_handle:
+        raw_mapping = json.load(file_handle)
+    with Path(threshold_config_path).open("r", encoding="utf-8") as file_handle:
+        threshold_config = json.load(file_handle)
+
+    label_mapping = {int(label_id): label for label_id, label in raw_mapping.items()}
+    encoder = SentenceTransformer(str(model_dir))
+    exemplar_embeddings = np.load(exemplar_embeddings_path)
+    exemplar_label_ids = np.load(exemplar_label_ids_path)
+    return ContrastivePredictor(
+        encoder=encoder,
+        label_mapping=label_mapping,
+        exemplar_embeddings=exemplar_embeddings,
+        exemplar_label_ids=exemplar_label_ids,
+        contrastive_config=contrastive_config,
+        oos_threshold=threshold_config.get("selected_oos_threshold"),
     )
 
 

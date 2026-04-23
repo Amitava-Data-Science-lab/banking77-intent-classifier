@@ -109,6 +109,37 @@ class TransformerConfig:
 
 
 @dataclass(slots=True)
+class ContrastiveConfig:
+    """Configuration for contrastive sentence-transformer experiments."""
+
+    model_name: str = "sentence-transformers/all-mpnet-base-v2"
+    batch_size: int = 16
+    epochs: int = 1
+    warmup_steps: int = 0
+    learning_rate: float = 2e-5
+    triplet_margin: float = 0.2
+    triplets_per_anchor: int = 10
+    hard_negative_ratio: float = 0.5
+    random_negative_ratio: float = 0.3
+    oos_negative_ratio: float = 0.2
+    hard_negative_source: str = "centroid_similarity"
+    hard_negative_top_k_labels: int = 10
+    max_hard_negative_samples_per_label: int = 3
+    oos_batch_reuse_limit: int = 0
+    neighbor_count: int = 5
+    distance_metric: str = "cosine"
+    vote_strategy: str = "sum_similarity"
+    threshold_candidates: list[float] = field(default_factory=list)
+    threshold_selection_metric: str = "macro_f1"
+    threshold_selection_strategy: str = "oos_aware_constrained"
+    threshold_max_in_scope_false_oos_rate: float = 0.03
+    threshold_macro_f1_tolerance_ladder: list[float] = field(
+        default_factory=lambda: [0.01, 0.02, 0.03, 0.04, 0.05]
+    )
+    threshold_fallback_strategy: str = "best_macro_f1"
+
+
+@dataclass(slots=True)
 class ExperimentConfig:
     """Configuration for a full training run."""
 
@@ -131,6 +162,7 @@ class ExperimentConfig:
     tfidf: TfidfConfig
     encoder: EncoderConfig
     transformer: TransformerConfig
+    contrastive: ContrastiveConfig
     reranker: RerankerConfig
     classifier: ClassifierConfig
     analysis: AnalysisConfig
@@ -266,6 +298,31 @@ def _parse_experiment_config(raw: dict, base_dir: Path) -> ExperimentConfig:
             oos_energy_fixed_probability_source=raw.get("transformer", {}).get("oos_energy_fixed_probability_source", "selected_validation_threshold"),
             temperature_scaling_enabled=raw.get("transformer", {}).get("temperature_scaling_enabled", False),
             temperature_scaling_grid=raw.get("transformer", {}).get("temperature_scaling_grid", [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 5.0]),
+        ),
+        contrastive=ContrastiveConfig(
+            model_name=raw.get("contrastive", {}).get("model_name", "sentence-transformers/all-mpnet-base-v2"),
+            batch_size=raw.get("contrastive", {}).get("batch_size", 16),
+            epochs=raw.get("contrastive", {}).get("epochs", 1),
+            warmup_steps=raw.get("contrastive", {}).get("warmup_steps", 0),
+            learning_rate=raw.get("contrastive", {}).get("learning_rate", 2e-5),
+            triplet_margin=raw.get("contrastive", {}).get("triplet_margin", 0.2),
+            triplets_per_anchor=raw.get("contrastive", {}).get("triplets_per_anchor", 10),
+            hard_negative_ratio=raw.get("contrastive", {}).get("hard_negative_ratio", 0.5),
+            random_negative_ratio=raw.get("contrastive", {}).get("random_negative_ratio", 0.3),
+            oos_negative_ratio=raw.get("contrastive", {}).get("oos_negative_ratio", 0.2),
+            hard_negative_source=raw.get("contrastive", {}).get("hard_negative_source", "centroid_similarity"),
+            hard_negative_top_k_labels=raw.get("contrastive", {}).get("hard_negative_top_k_labels", 10),
+            max_hard_negative_samples_per_label=raw.get("contrastive", {}).get("max_hard_negative_samples_per_label", 3),
+            oos_batch_reuse_limit=raw.get("contrastive", {}).get("oos_batch_reuse_limit", 0),
+            neighbor_count=raw.get("contrastive", {}).get("neighbor_count", 5),
+            distance_metric=raw.get("contrastive", {}).get("distance_metric", "cosine"),
+            vote_strategy=raw.get("contrastive", {}).get("vote_strategy", "sum_similarity"),
+            threshold_candidates=raw.get("contrastive", {}).get("threshold_candidates", []),
+            threshold_selection_metric=raw.get("contrastive", {}).get("threshold_selection_metric", "macro_f1"),
+            threshold_selection_strategy=raw.get("contrastive", {}).get("threshold_selection_strategy", "oos_aware_constrained"),
+            threshold_max_in_scope_false_oos_rate=raw.get("contrastive", {}).get("threshold_max_in_scope_false_oos_rate", 0.03),
+            threshold_macro_f1_tolerance_ladder=raw.get("contrastive", {}).get("threshold_macro_f1_tolerance_ladder", [0.01, 0.02, 0.03, 0.04, 0.05]),
+            threshold_fallback_strategy=raw.get("contrastive", {}).get("threshold_fallback_strategy", "best_macro_f1"),
         ),
         reranker=RerankerConfig(
             model_name=raw.get("reranker", {}).get("model_name", "cross-encoder/ms-marco-MiniLM-L-6-v2"),

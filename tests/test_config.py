@@ -231,3 +231,16 @@ def test_load_config_reads_clinc150_champion_file() -> None:
     assert config.oos_confidence_threshold == 0.5
     assert config.oos_margin_threshold == 0.0
     assert config.artifacts_dir.name == "champion"
+
+
+def test_load_config_reads_clinc150_contrastive_mpnet_file() -> None:
+    config = load_config(Path("configs/clinc150_sentence_transformer_contrastive_mpnet.json"))
+
+    assert config.model_family == "sentence_transformer_contrastive_knn"
+    assert config.dataset_type == "clinc150"
+    assert config.contrastive.model_name == "sentence-transformers/all-mpnet-base-v2"
+    assert config.contrastive.triplets_per_anchor == 10
+    assert config.contrastive.hard_negative_ratio == 0.5
+    assert config.contrastive.random_negative_ratio == 0.3
+    assert config.contrastive.oos_negative_ratio == 0.2
+    assert config.contrastive.threshold_selection_strategy == "oos_aware_constrained"

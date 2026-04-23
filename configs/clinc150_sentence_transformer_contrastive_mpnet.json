@@ -1,0 +1,79 @@
+{
+  "model_family": "sentence_transformer_contrastive_knn",
+  "dataset_type": "clinc150",
+  "dataset_name": "clinc150",
+  "dataset_task": "full_intent",
+  "dataset_source": "../data/clinc150/data_full.json",
+  "train_split": "train",
+  "validation_split": "val",
+  "test_split": "test",
+  "include_oos": true,
+  "artifacts_dir": "../artifacts/clinc150/sentence_transformer_contrastive_mpnet",
+  "reports_dir": "../reports/clinc150/sentence_transformer_contrastive_mpnet",
+  "text_column": "text",
+  "label_column": "label",
+  "random_seed": 42,
+  "tfidf": {
+    "lowercase": true,
+    "strip_accents": "unicode",
+    "normalization": "none",
+    "ngram_range": [1, 2],
+    "min_df": 2,
+    "max_df": 0.98,
+    "sublinear_tf": true,
+    "max_features": 50000
+  },
+  "encoder": {
+    "model_name": "sentence-transformers/all-mpnet-base-v2",
+    "batch_size": 32,
+    "normalize_embeddings": true,
+    "device": null
+  },
+  "transformer": {
+    "model_name": "sentence-transformers/all-mpnet-base-v2"
+  },
+  "contrastive": {
+    "model_name": "sentence-transformers/all-mpnet-base-v2",
+    "batch_size": 16,
+    "epochs": 1,
+    "warmup_steps": 0,
+    "learning_rate": 2e-5,
+    "triplet_margin": 0.2,
+    "triplets_per_anchor": 10,
+    "hard_negative_ratio": 0.5,
+    "random_negative_ratio": 0.3,
+    "oos_negative_ratio": 0.2,
+    "hard_negative_source": "centroid_similarity",
+    "hard_negative_top_k_labels": 10,
+    "max_hard_negative_samples_per_label": 3,
+    "oos_batch_reuse_limit": 1,
+    "neighbor_count": 5,
+    "distance_metric": "cosine",
+    "vote_strategy": "sum_similarity",
+    "threshold_candidates": [0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5],
+    "threshold_selection_metric": "macro_f1",
+    "threshold_selection_strategy": "oos_aware_constrained",
+    "threshold_max_in_scope_false_oos_rate": 0.03,
+    "threshold_macro_f1_tolerance_ladder": [0.01, 0.02, 0.03, 0.04, 0.05],
+    "threshold_fallback_strategy": "best_macro_f1"
+  },
+  "reranker": {
+    "enabled": false
+  },
+  "classifier": {
+    "c": 1.0,
+    "class_weight": "balanced",
+    "max_iter": 5000,
+    "dual": true,
+    "random_state": 42,
+    "knn_neighbors": 5,
+    "knn_weights": "distance",
+    "knn_metric": "cosine",
+    "probability_calibration_method": "sigmoid",
+    "probability_calibration_cv": 5
+  },
+  "analysis": {
+    "top_k_confusions": 25,
+    "top_k_features_per_class": 20
+  }
+}

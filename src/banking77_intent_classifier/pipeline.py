@@ -6,12 +6,19 @@ import logging
 from dataclasses import asdict
 from pathlib import Path
 
+import numpy as np
+
 from banking77_intent_classifier.artifacts import (
     ensure_output_directories,
+    save_contrastive_artifacts,
     save_evaluation_reports,
     save_model_artifacts,
 )
 from banking77_intent_classifier.config import load_config
+from banking77_intent_classifier.contrastive_modeling import (
+    retrieve_contrastive_predictions,
+    train_contrastive_model,
+)
 from banking77_intent_classifier.data import load_dataset_bundle
 from banking77_intent_classifier.evaluation import evaluate_predictions, save_confusion_matrix_figure
 from banking77_intent_classifier.modeling import (
@@ -92,6 +99,69 @@ def run_training_pipeline(
         len(dataset.test_texts),
         len(dataset.label_names),
     )
+
+    if config.model_family == "sentence_transformer_contrastive_knn":
+        contrastive_artifacts = train_contrastive_model(dataset=dataset, config=config)
+        test_retrieval = retrieve_contrastive_predictions(
+            encoder=contrastive_artifacts.encoder,
+            texts=dataset.test_texts,
+            exemplar_embeddings=contrastive_artifacts.exemplar_embeddings,
+            exemplar_label_ids=contrastive_artifacts.exemplar_label_ids,
+            label_names=dataset.label_names,
+            contrastive_config=config.contrastive,
+            oos_threshold=contrastive_artifacts.selected_oos_threshold,
+        )
+        evaluation = evaluate_predictions(
+            y_true=dataset.test_labels,
+            y_pred=test_retrieval.predictions.tolist(),
+            top_k_predicted_labels=test_retrieval.top_k_predicted_labels,
+            label_names=dataset.label_names,
+            coefficients=None,
+            feature_names=np.array([], dtype=object),
+            top_k_confusions=config.analysis.top_k_confusions,
+            top_k_features_per_class=config.analysis.top_k_features_per_class,
+        )
+        run_summary = {
+            "accuracy": evaluation.accuracy,
+            "macro_f1": evaluation.macro_f1,
+            "top_5_accuracy": evaluation.top_5_accuracy,
+            "oos_metrics": evaluation.oos_metrics,
+            "model_family": config.model_family,
+            "dataset_type": config.dataset_type,
+            "dataset_task": config.dataset_task,
+            "oos_confidence_threshold": contrastive_artifacts.selected_oos_threshold,
+            "oos_margin_threshold": None,
+            "encoder_model_name": config.contrastive.model_name,
+            "reranker_model_name": None,
+            "artifacts_dir": str(config.artifacts_dir),
+            "reports_dir": str(config.reports_dir),
+            "top_confusions_rows": len(evaluation.top_confusions_df),
+            "train_samples": len(dataset.train_texts),
+            "validation_samples": len(dataset.validation_texts),
+            "test_samples": len(dataset.test_texts),
+            "label_count": len(dataset.label_names),
+            "exemplar_count": int(contrastive_artifacts.exemplar_embeddings.shape[0]),
+            "neighbor_count": config.contrastive.neighbor_count,
+            "distance_metric": config.contrastive.distance_metric,
+            "vote_strategy": config.contrastive.vote_strategy,
+            "validation_threshold_candidates": contrastive_artifacts.validation_metrics_by_threshold,
+            "threshold_selection_metadata": contrastive_artifacts.threshold_selection_metadata,
+            "training_data_metadata": contrastive_artifacts.training_data_metadata,
+        }
+        save_contrastive_artifacts(
+            contrastive_artifacts=contrastive_artifacts,
+            config=config,
+            label_names=dataset.label_names,
+        )
+        save_evaluation_reports(evaluation=evaluation, config=config, run_summary=run_summary)
+        save_confusion_matrix_figure(
+            confusion_matrix_df=evaluation.confusion_matrix_df,
+            output_path=config.reports_dir / "confusion_matrix.png",
+            title="CLINC150 Contrastive Confusion Matrix",
+        )
+        LOGGER.info("Saved contrastive artifacts to %s", config.artifacts_dir)
+        LOGGER.info("Saved contrastive reports to %s", config.reports_dir)
+        return run_summary
 
     if config.model_family == "transformer_sequence_classifier":
         transformer_artifacts = train_transformer_classifier(dataset=dataset, config=config)
