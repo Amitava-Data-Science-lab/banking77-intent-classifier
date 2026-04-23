@@ -165,6 +165,25 @@ banking77-train --config configs/clinc150_sentence_transformer_linear_bge_small.
 
 CLINC150 outputs are namespaced under `artifacts/clinc150/` and `reports/clinc150/` so they do not overwrite Banking77 experiments.
 
+### CLINC150 Champion Promotion Checklist
+
+Promote a CLINC150 model to champion only when it satisfies all of the following against the current frozen CLINC150 champion:
+
+- test `accuracy` is at least as good
+- test `macro_f1` is at least as good
+- test `oos_f1` is at least as good
+- test `in_scope_false_oos_rate` is not worse
+- test `oos_recall` does not regress materially without a clearly better false-OOS tradeoff
+- the chosen threshold comes from a clean validation sweep, not a one-off manual override
+- the end-to-end config, artifact saving, and inference loading path work without notebook-only patching
+- the result reproduces on at least one clean rerun before the champion alias is changed
+
+Current clean contrastive candidate for champion validation:
+
+```powershell
+banking77-train --config configs/clinc150_sentence_transformer_contrastive_mpnet_maxsim_candidate.json
+```
+
 ## Outputs
 
 Each run writes production-friendly artifacts to the configured `artifacts/` and `reports/` directories. Banking77 and CLINC150 configs use separate directories so each dataset can maintain its own experiment history and future champion alias.

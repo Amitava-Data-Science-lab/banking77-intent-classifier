@@ -243,4 +243,14 @@ def test_load_config_reads_clinc150_contrastive_mpnet_file() -> None:
     assert config.contrastive.hard_negative_ratio == 0.5
     assert config.contrastive.random_negative_ratio == 0.3
     assert config.contrastive.oos_negative_ratio == 0.2
+    assert config.contrastive.threshold_candidates == [3.1]
     assert config.contrastive.threshold_selection_strategy == "oos_aware_constrained"
+
+
+def test_load_config_reads_clinc150_contrastive_maxsim_candidate_file() -> None:
+    config = load_config(Path("configs/clinc150_sentence_transformer_contrastive_mpnet_maxsim_candidate.json"))
+
+    assert config.model_family == "sentence_transformer_contrastive_knn"
+    assert config.contrastive.vote_strategy == "max_similarity"
+    assert config.contrastive.threshold_candidates == [0.65, 0.69, 0.73, 0.76, 0.8]
+    assert config.artifacts_dir.name == "sentence_transformer_contrastive_mpnet_maxsim_candidate"
