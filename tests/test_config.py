@@ -252,5 +252,5 @@ def test_load_config_reads_clinc150_contrastive_maxsim_candidate_file() -> None:
 
     assert config.model_family == "sentence_transformer_contrastive_knn"
     assert config.contrastive.vote_strategy == "max_similarity"
-    assert config.contrastive.threshold_candidates == [0.65, 0.69, 0.73, 0.76, 0.8]
+    assert config.contrastive.threshold_candidates == [0.68, 0.69, 0.7, 0.71, 0.72, 0.73]
     assert config.artifacts_dir.name == "sentence_transformer_contrastive_mpnet_maxsim_candidate"

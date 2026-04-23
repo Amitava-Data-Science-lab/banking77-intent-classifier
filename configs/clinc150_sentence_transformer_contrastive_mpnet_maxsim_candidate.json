@@ -50,7 +50,7 @@
     "neighbor_count": 5,
     "distance_metric": "cosine",
     "vote_strategy": "max_similarity",
-    "threshold_candidates": [0.65, 0.69, 0.73, 0.76, 0.8],
+    "threshold_candidates": [0.68, 0.69, 0.7, 0.71, 0.72, 0.73],
     "threshold_selection_metric": "macro_f1",
     "threshold_selection_strategy": "oos_aware_constrained",
     "threshold_max_in_scope_false_oos_rate": 0.03,
