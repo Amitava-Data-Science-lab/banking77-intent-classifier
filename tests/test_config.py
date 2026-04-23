@@ -226,10 +226,10 @@ def test_load_config_reads_sentence_threshold_and_margin_file() -> None:
 def test_load_config_reads_clinc150_champion_file() -> None:
     config = load_config(Path("configs/clinc150_champion.json"))
 
-    assert config.model_family == "sentence_transformer_linear"
+    assert config.model_family == "sentence_transformer_contrastive_knn"
     assert config.encoder.model_name == "sentence-transformers/all-mpnet-base-v2"
-    assert config.oos_confidence_threshold == 0.5
-    assert config.oos_margin_threshold == 0.0
+    assert config.contrastive.vote_strategy == "max_similarity"
+    assert config.contrastive.threshold_candidates == [0.71]
     assert config.artifacts_dir.name == "champion"
 
 

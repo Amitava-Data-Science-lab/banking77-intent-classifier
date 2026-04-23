@@ -178,10 +178,10 @@ Promote a CLINC150 model to champion only when it satisfies all of the following
 - the end-to-end config, artifact saving, and inference loading path work without notebook-only patching
 - the result reproduces on at least one clean rerun before the champion alias is changed
 
-Current clean contrastive candidate for champion validation:
+Current frozen CLINC150 champion:
 
 ```powershell
-banking77-train --config configs/clinc150_sentence_transformer_contrastive_mpnet_maxsim_candidate.json
+banking77-train --config configs/clinc150_champion.json
 ```
 
 ## Outputs
